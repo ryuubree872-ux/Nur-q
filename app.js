@@ -1,1223 +1,1056 @@
 /* =========================================================
-   NURQ
-   Quran + Tajwid + Prayer Times + Adhan Alarm
+   NURQ V2
+   Quran Reader + Latin + Translation + Auto Recitation
    ========================================================= */
 
-const API = "https://api.alquran.cloud/v1";
-const PRAYER_API = "https://api.aladhan.com/v1";
+const QURAN_API = "https://api.alquran.cloud/v1";
+
+const AUDIO_BASE =
+  "https://cdn.islamic.network/quran/audio/128/ar.alafasy";
 
 const state = {
   surahs: [],
-  currentSurah: null,
-  currentAyah: 0,
+  current: null,
+  currentIndex: 0,
   playing: false,
-  audioQueue: [],
-  audioIndex: 0,
-  prayers: null,
-  coordinates: null,
-  bookmarks: JSON.parse(localStorage.getItem("nurq_bookmarks") || "[]"),
-  settings: {
-    animation: true,
-    autoNext: true,
-    fontSize: 30,
-    adhan: false
-  }
+  autoNext: true,
+  bookmarks: JSON.parse(
+    localStorage.getItem("nurq_bookmarks") || "[]"
+  ),
+  fontSize: Number(
+    localStorage.getItem("nurq_font_size") || 30
+  )
 };
 
-const $ = selector => document.querySelector(selector);
-const $$ = selector => [...document.querySelectorAll(selector)];
+const audio =
+  document.getElementById("audioPlayer");
 
-const audio = $("#audioPlayer");
+const $ = s =>
+  document.querySelector(s);
 
-
-/* =========================================================
-   INIT
-   ========================================================= */
-
-document.addEventListener("DOMContentLoaded", async () => {
-
-  bindNavigation();
-  bindGlobalButtons();
-  bindSettings();
-  bindLessons();
-
-  loadSettings();
-  renderBookmarks();
-
-  await loadSurahs();
-  await loadPrayerTimes();
-
-  updateClock();
-  setInterval(updateClock, 1000);
-  setInterval(checkPrayerAlarm, 1000);
-});
+const $$ = s =>
+  [...document.querySelectorAll(s)];
 
 
 /* =========================================================
-   NAVIGATION
+   START
    ========================================================= */
 
-function bindNavigation() {
+document.addEventListener(
+  "DOMContentLoaded",
+  async () => {
 
-  $$("[data-page]").forEach(button => {
+    initNavigation();
+    initSettings();
+    initSearch();
+    initModals();
+    initPrayer();
 
-    button.addEventListener("click", () => {
+    applyFont();
 
-      const page = button.dataset.page;
+    await loadSurahs();
 
-      if (!page) return;
+    loadPrayerTimes();
 
-      showPage(page);
-    });
-  });
-
-  $("#readerBack").addEventListener("click", () => {
-    showPage("quran");
-  });
-}
-
-
-function showPage(page) {
-
-  $$(".page").forEach(p => {
-    p.classList.remove("active");
-  });
-
-  const target = $(`#${page}Page`);
-
-  if (target) {
-    target.classList.add("active");
-  }
-
-  $$(".nav-item").forEach(item => {
-    item.classList.toggle(
-      "active",
-      item.dataset.page === page
-    );
-  });
-
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth"
-  });
-
-  if (page === "bookmarks") {
     renderBookmarks();
+
+    console.log(
+      "NurQ V2 berhasil dimulai"
+    );
+  }
+);
+
+
+/* =========================================================
+   SAFE FETCH
+   ========================================================= */
+
+async function api(url) {
+
+  const controller =
+    new AbortController();
+
+  const timeout =
+    setTimeout(
+      () => controller.abort(),
+      15000
+    );
+
+  try {
+
+    const response =
+      await fetch(
+        url,
+        {
+          signal:
+            controller.signal,
+          cache: "no-store"
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}`
+      );
+    }
+
+    const json =
+      await response.json();
+
+    if (!json || json.code !== 200) {
+      throw new Error(
+        json?.status ||
+        "API error"
+      );
+    }
+
+    return json.data;
+
+  } finally {
+
+    clearTimeout(timeout);
   }
 }
 
 
 /* =========================================================
-   SURAH DATA
+   SURAH LIST
    ========================================================= */
 
 async function loadSurahs() {
 
+  const list =
+    $("#surahList");
+
+  if (list) {
+
+    list.innerHTML = `
+      <div class="bookmark-empty">
+        <div style="font-size:32px">
+          ⏳
+        </div>
+        <p>
+          Memuat 114 surah...
+        </p>
+      </div>
+    `;
+  }
+
   try {
 
-    const response = await fetch(
-      `${API}/surah`
-    );
-
-    const json = await response.json();
-
-    state.surahs = json.data || [];
+    state.surahs =
+      await api(
+        `${QURAN_API}/surah`
+      );
 
     renderSurahs();
 
   } catch (error) {
 
-    toast("Gagal memuat daftar surah");
-    console.error(error);
+    console.error(
+      "SURAH ERROR:",
+      error
+    );
+
+    if (list) {
+
+      list.innerHTML = `
+        <div class="bookmark-empty">
+
+          <div style="font-size:35px">
+            ⚠️
+          </div>
+
+          <p>
+            Gagal memuat daftar surah.
+          </p>
+
+          <button
+            id="retrySurah"
+            class="adhan-test"
+          >
+            Coba lagi
+          </button>
+
+        </div>
+      `;
+
+      $("#retrySurah")
+        ?.addEventListener(
+          "click",
+          loadSurahs
+        );
+    }
+
+    toast(
+      "Internet/API tidak dapat diakses"
+    );
   }
 }
 
 
-function renderSurahs(filter = "") {
+function renderSurahs(
+  search = ""
+) {
 
-  const list = $("#surahList");
+  const list =
+    $("#surahList");
 
-  const normalized = filter
-    .toLowerCase()
-    .trim();
+  if (!list) return;
 
-  const filtered = state.surahs.filter(surah => {
+  const q =
+    search
+      .toLowerCase()
+      .trim();
 
-    return (
-      surah.englishName.toLowerCase().includes(normalized) ||
-      surah.name.toLowerCase().includes(normalized) ||
-      String(surah.number).includes(normalized)
+  const data =
+    state.surahs.filter(
+      s =>
+        !q ||
+        s.englishName
+          .toLowerCase()
+          .includes(q) ||
+        s.name
+          .toLowerCase()
+          .includes(q) ||
+        String(s.number)
+          .includes(q)
     );
-  });
 
-  list.innerHTML = filtered.map(surah => `
+  if (!data.length) {
 
-    <button class="surah-card" data-surah="${surah.number}">
-
-      <div class="surah-number">
-        ${surah.number}
+    list.innerHTML = `
+      <div class="bookmark-empty">
+        Surah tidak ditemukan.
       </div>
+    `;
 
-      <div class="surah-main">
-        <strong>${escapeHTML(surah.englishName)}</strong>
-        <span>
-          ${surah.revelationType} • ${surah.numberOfAyahs} ayat
-        </span>
-      </div>
+    return;
+  }
 
-      <div class="surah-arabic">
-        ${escapeHTML(surah.name)}
-      </div>
+  list.innerHTML =
+    data.map(
+      s => `
 
-    </button>
+      <button
+        class="surah-card"
+        data-open-surah="${s.number}"
+      >
 
-  `).join("");
+        <div class="surah-number">
+          ${s.number}
+        </div>
 
-  $$(".surah-card").forEach(card => {
+        <div class="surah-main">
 
-    card.addEventListener("click", () => {
+          <strong>
+            ${escapeHTML(
+              s.englishName
+            )}
+          </strong>
 
-      openSurah(
-        Number(card.dataset.surah)
-      );
+          <span>
+            ${s.revelationType}
+            •
+            ${s.numberOfAyahs}
+            ayat
+          </span>
+
+        </div>
+
+        <div class="surah-arabic">
+          ${escapeHTML(s.name)}
+        </div>
+
+      </button>
+    `
+    ).join("");
+
+  $$("[data-open-surah]")
+    .forEach(btn => {
+
+      btn.onclick = () => {
+
+        openSurah(
+          Number(
+            btn.dataset.openSurah
+          )
+        );
+
+      };
 
     });
-
-  });
 }
-
-
-$("#surahSearch")?.addEventListener("input", e => {
-  renderSurahs(e.target.value);
-});
 
 
 /* =========================================================
    OPEN SURAH
    ========================================================= */
 
-async function openSurah(number) {
+async function openSurah(
+  number
+) {
 
   showPage("reader");
 
   $("#ayahList").innerHTML = `
     <div class="bookmark-empty">
-      Memuat ayat...
+      <div style="font-size:32px">
+        📖
+      </div>
+
+      <p>
+        Memuat bacaan...
+      </p>
     </div>
   `;
 
   try {
 
-    const url =
-      `${API}/surah/${number}/editions/quran-uthmani,en.transliteration,id.indonesian`;
+    /*
+      IMPORTANT:
+      Jangan meminta tiga edition sekaligus.
+      Ambil masing-masing secara terpisah.
+    */
 
-    const response = await fetch(url);
-    const json = await response.json();
+    const arabicPromise =
+      api(
+        `${QURAN_API}/surah/${number}/quran-uthmani`
+      );
 
-    const editions = json.data;
+    const latinPromise =
+      api(
+        `${QURAN_API}/surah/${number}/en.transliteration`
+      ).catch(
+        () => null
+      );
 
-    const arabic = editions.find(
-      e => e.identifier === "quran-uthmani"
-    );
+    const indoPromise =
+      api(
+        `${QURAN_API}/surah/${number}/id.indonesian`
+      ).catch(
+        () => null
+      );
 
-    const transliteration = editions.find(
-      e => e.identifier === "en.transliteration"
-    );
-
-    const indonesia = editions.find(
-      e => e.identifier === "id.indonesian"
-    );
-
-    state.currentSurah = {
-      number,
+    const [
       arabic,
-      transliteration,
-      indonesia
+      latin,
+      indo
+    ] =
+      await Promise.all([
+        arabicPromise,
+        latinPromise,
+        indoPromise
+      ]);
+
+    state.current = {
+      arabic,
+      latin,
+      indo
     };
 
-    state.currentAyah = 0;
+    state.currentIndex = 0;
 
-    $("#readerTitle").textContent =
-      arabic.englishName;
-
-    $("#readerArabicName").textContent =
-      arabic.name;
-
-    $("#readerTranslation").textContent =
-      arabic.englishNameTranslation;
-
-    $("#readerInfo").textContent =
-      `${arabic.revelationType} • ${arabic.numberOfAyahs} ayat`;
-
-    renderAyahs();
+    renderReader();
 
     localStorage.setItem(
       "nurq_last_surah",
-      String(number)
+      number
     );
 
   } catch (error) {
 
-    console.error(error);
+    console.error(
+      "OPEN SURAH ERROR:",
+      error
+    );
 
-    toast("Gagal memuat surah");
+    $("#ayahList").innerHTML = `
+      <div class="bookmark-empty">
+
+        <div style="font-size:40px">
+          ⚠️
+        </div>
+
+        <p>
+          Bacaan surah gagal dimuat.
+        </p>
+
+        <button
+          class="adhan-test"
+          id="retryCurrentSurah"
+        >
+          Muat ulang
+        </button>
+
+      </div>
+    `;
+
+    $("#retryCurrentSurah")
+      ?.addEventListener(
+        "click",
+        () => openSurah(number)
+      );
+
+    toast(
+      "Gagal memuat bacaan"
+    );
   }
 }
 
 
 /* =========================================================
-   AYAH
+   RENDER READER
    ========================================================= */
 
-function renderAyahs() {
+function renderReader() {
 
-  const { arabic, transliteration, indonesia } =
-    state.currentSurah;
+  const {
+    arabic,
+    latin,
+    indo
+  } = state.current;
 
-  const html = arabic.ayahs.map((ayah, index) => {
+  $("#readerTitle").textContent =
+    arabic.englishName;
 
-    const latin =
-      transliteration?.ayahs?.[index]?.text || "";
+  $("#readerArabicName").textContent =
+    arabic.name;
 
-    const translation =
-      indonesia?.ayahs?.[index]?.text || "";
+  $("#readerTranslation").textContent =
+    arabic.englishNameTranslation;
 
-    return `
+  $("#readerInfo").textContent =
+    `${arabic.revelationType} • ` +
+    `${arabic.numberOfAyahs} ayat`;
 
-      <article
-        class="ayah"
-        id="ayah-${index}"
-        data-index="${index}"
-      >
+  $("#ayahList").innerHTML =
+    arabic.ayahs.map(
+      (ayah, index) => {
 
-        <div class="ayah-head">
+        const latinText =
+          latin?.ayahs?.[index]?.text ||
+          "Latin tidak tersedia";
 
-          <span class="ayah-number">
-            ۞ ${ayah.numberInSurah}
-          </span>
+        const indoText =
+          indo?.ayahs?.[index]?.text ||
+          "Terjemahan tidak tersedia";
 
-          <button
-            class="ayah-play"
-            data-play="${index}"
+        return `
+
+          <article
+            class="ayah"
+            id="ayah-${index}"
+            data-ayah-index="${index}"
           >
-            ▶
-          </button>
 
-        </div>
+            <div class="ayah-head">
 
-        <div class="ayah-arabic">
-          ${escapeHTML(ayah.text)}
-        </div>
+              <span class="ayah-number">
+                ۞
+                ${ayah.numberInSurah}
+              </span>
 
-        <div class="ayah-latin">
-          ${escapeHTML(latin)}
-        </div>
+              <button
+                class="ayah-play"
+                data-play-ayah="${index}"
+              >
+                ▶
+              </button>
 
-        <div class="ayah-translation">
-          ${escapeHTML(stripHTML(translation))}
-        </div>
+            </div>
 
-      </article>
-    `;
+            <div class="ayah-arabic">
 
-  }).join("");
+              ${escapeHTML(
+                ayah.text
+              )}
 
-  $("#ayahList").innerHTML = html;
+            </div>
 
-  $$("[data-play]").forEach(button => {
+            <div class="ayah-latin">
 
-    button.addEventListener("click", e => {
+              ${escapeHTML(
+                latinText
+              )}
 
-      e.stopPropagation();
+            </div>
 
-      playAyah(
-        Number(button.dataset.play)
-      );
+            <div class="ayah-translation">
+
+              ${escapeHTML(
+                stripHTML(indoText)
+              )}
+
+            </div>
+
+            <div
+              style="
+                display:flex;
+                gap:8px;
+                margin-top:12px;
+              "
+            >
+
+              <button
+                class="round-btn"
+                data-play-ayah="${index}"
+              >
+                🔊
+              </button>
+
+              <button
+                class="round-btn"
+                data-save-ayah="${index}"
+              >
+                🔖
+              </button>
+
+            </div>
+
+          </article>
+
+        `;
+      }
+    ).join("");
+
+  $$("[data-play-ayah]")
+    .forEach(btn => {
+
+      btn.onclick = e => {
+
+        e.stopPropagation();
+
+        playAyah(
+          Number(
+            btn.dataset.playAyah
+          )
+        );
+      };
+
     });
 
-  });
+  $$("[data-save-ayah]")
+    .forEach(btn => {
+
+      btn.onclick = e => {
+
+        e.stopPropagation();
+
+        saveCurrentAyah(
+          Number(
+            btn.dataset.saveAyah
+          )
+        );
+
+      };
+
+    });
 
   $$(".ayah").forEach(card => {
 
-    card.addEventListener("click", () => {
+    card.onclick = () => {
 
-      const index =
-        Number(card.dataset.index);
+      playAyah(
+        Number(
+          card.dataset.ayahIndex
+        )
+      );
 
-      playAyah(index);
-
-    });
+    };
 
   });
 }
 
 
 /* =========================================================
-   QURAN AUDIO
-   =========================================================
-
-   Al Quran Cloud menyediakan audio per ayat.
-   ar.alafasy = Mishary Alafasy.
-
-   Format:
-   https://cdn.islamic.network/quran/audio/128/ar.alafasy/{ayah}.mp3
-
+   AUDIO
    ========================================================= */
 
-function getAudioURL(globalAyahNumber) {
+function audioURL(
+  globalAyahNumber
+) {
 
   return (
-    `https://cdn.islamic.network/quran/audio/128/ar.alafasy/${globalAyahNumber}.mp3`
+    `${AUDIO_BASE}/` +
+    `${globalAyahNumber}.mp3`
   );
 }
 
 
-function playAyah(index) {
+async function playAyah(
+  index
+) {
 
-  if (!state.currentSurah) return;
+  if (!state.current) {
+
+    toast(
+      "Buka surah terlebih dahulu"
+    );
+
+    return;
+  }
 
   const ayah =
-    state.currentSurah.arabic.ayahs[index];
+    state.current
+      .arabic
+      .ayahs[index];
 
   if (!ayah) return;
 
-  state.currentAyah = index;
+  state.currentIndex =
+    index;
+
   state.playing = true;
 
   highlightAyah(index);
 
-  audio.src =
-    getAudioURL(ayah.number);
+  const url =
+    audioURL(
+      ayah.number
+    );
 
-  audio.play()
-    .then(() => {
-      animateReading(index);
-    })
-    .catch(() => {
+  console.log(
+    "Playing:",
+    url
+  );
 
-      toast(
-        "Tekan tombol play untuk mengizinkan audio"
-      );
+  audio.pause();
 
-    });
+  audio.currentTime = 0;
+
+  audio.src = url;
+
+  try {
+
+    await audio.play();
+
+    animateAyah(index);
+
+  } catch (error) {
+
+    console.error(
+      "AUDIO PLAY ERROR:",
+      error
+    );
+
+    toast(
+      "Tekan tombol Play untuk mengaktifkan audio"
+    );
+  }
 }
 
 
-function highlightAyah(index) {
+/* =========================================================
+   AUTO PLAY NEXT
+   ========================================================= */
 
-  $$(".ayah").forEach(el => {
-    el.classList.remove("playing");
-  });
+audio.addEventListener(
+  "ended",
+  () => {
 
-  const target =
+    if (!state.current) {
+      return;
+    }
+
+    const total =
+      state.current
+        .arabic
+        .ayahs
+        .length;
+
+    if (
+      state.autoNext &&
+      state.currentIndex <
+        total - 1
+    ) {
+
+      const next =
+        state.currentIndex + 1;
+
+      setTimeout(
+        () => {
+          playAyah(next);
+        },
+        250
+      );
+
+    } else {
+
+      state.playing = false;
+
+      $$(".ayah")
+        .forEach(
+          el =>
+            el.classList.remove(
+              "playing"
+            )
+        );
+
+      toast(
+        "Surah selesai dibaca"
+      );
+    }
+  }
+);
+
+
+/* =========================================================
+   PLAY WHOLE SURAH
+   ========================================================= */
+
+function playWholeSurah() {
+
+  if (!state.current) {
+
+    toast(
+      "Pilih surah terlebih dahulu"
+    );
+
+    return;
+  }
+
+  /*
+    Ini adalah interaksi pengguna.
+    Setelah audio pertama berhasil,
+    event "ended" akan meneruskan
+    ke ayat berikutnya secara otomatis.
+  */
+
+  state.autoNext = true;
+
+  playAyah(0);
+
+  toast(
+    "Bacaan otomatis dimulai"
+  );
+}
+
+
+/* =========================================================
+   PAUSE
+   ========================================================= */
+
+function pauseAudio() {
+
+  audio.pause();
+
+  state.playing = false;
+
+  toast(
+    "Bacaan dijeda"
+  );
+}
+
+
+/* =========================================================
+   STOP
+   ========================================================= */
+
+function stopAudio() {
+
+  audio.pause();
+
+  audio.currentTime = 0;
+
+  state.playing = false;
+
+  $$(".ayah")
+    .forEach(
+      el =>
+        el.classList.remove(
+          "playing"
+        )
+    );
+
+  toast(
+    "Bacaan dihentikan"
+  );
+}
+
+
+/* =========================================================
+   HIGHLIGHT
+   ========================================================= */
+
+function highlightAyah(
+  index
+) {
+
+  $$(".ayah")
+    .forEach(
+      el =>
+        el.classList.remove(
+          "playing"
+        )
+    );
+
+  const card =
     $(`#ayah-${index}`);
 
-  if (!target) return;
+  if (!card) return;
 
-  target.classList.add("playing");
+  card.classList.add(
+    "playing"
+  );
 
-  target.scrollIntoView({
+  card.scrollIntoView({
     behavior: "smooth",
     block: "center"
   });
 }
 
 
-function animateReading(index) {
+function animateAyah(
+  index
+) {
 
-  if (!state.settings.animation) return;
-
-  const target =
+  const card =
     $(`#ayah-${index}`);
 
-  if (!target) return;
+  if (!card) return;
 
-  target.animate(
+  card.animate(
     [
       {
-        transform: "scale(.98)",
-        opacity: ".65"
+        transform:
+          "scale(.97)",
+        opacity: .65
       },
+
       {
-        transform: "scale(1.015)",
-        opacity: "1"
+        transform:
+          "scale(1.025)",
+        opacity: 1
       },
+
       {
-        transform: "scale(1)",
-        opacity: "1"
+        transform:
+          "scale(1)",
+        opacity: 1
       }
     ],
     {
-      duration: 750,
-      easing: "cubic-bezier(.2,.8,.2,1)"
+      duration: 700,
+      easing:
+        "cubic-bezier(.2,.8,.2,1)"
     }
   );
 }
 
 
-audio.addEventListener("ended", () => {
-
-  if (!state.currentSurah) return;
-
-  if (
-    state.settings.autoNext &&
-    state.currentAyah <
-      state.currentSurah.arabic.ayahs.length - 1
-  ) {
-
-    playAyah(
-      state.currentAyah + 1
-    );
-
-  } else {
-
-    state.playing = false;
-
-    $$(".ayah").forEach(el => {
-      el.classList.remove("playing");
-    });
-
-  }
-});
-
-
-$("#playSurah").addEventListener("click", () => {
-
-  if (!state.currentSurah) return;
-
-  playAyah(state.currentAyah);
-
-});
-
-
-$("#pauseSurah").addEventListener("click", () => {
-
-  audio.pause();
-
-  state.playing = false;
-
-});
-
-
-$("#stopSurah").addEventListener("click", () => {
-
-  audio.pause();
-  audio.currentTime = 0;
-  state.playing = false;
-
-  $$(".ayah").forEach(el => {
-    el.classList.remove("playing");
-  });
-
-});
-
-
 /* =========================================================
-   PRAYER TIMES
+   BUTTONS READER
    ========================================================= */
 
-async function loadPrayerTimes() {
-
-  if (!navigator.geolocation) {
-
-    await loadPrayerByDefault();
-    return;
-  }
-
-  navigator.geolocation.getCurrentPosition(
-
-    async position => {
-
-      state.coordinates = {
-        lat: position.coords.latitude,
-        lon: position.coords.longitude
-      };
-
-      $("#locationText").textContent =
-        "Lokasi perangkat";
-
-      await fetchPrayerTimes(
-        position.coords.latitude,
-        position.coords.longitude
-      );
-
-    },
-
-    async () => {
-
-      $("#locationText").textContent =
-        "Lokasi tidak diizinkan";
-
-      await loadPrayerByDefault();
-
-    },
-
-    {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 300000
-    }
-
-  );
-}
-
-
-async function loadPrayerByDefault() {
-
-  /*
-    Default Indonesia.
-    Pengguna tetap bisa menekan tombol lokasi
-    untuk menggunakan GPS.
-  */
-
-  await fetchPrayerTimes(
-    -6.200000,
-    106.816666
+$("#playSurah")
+  ?.addEventListener(
+    "click",
+    playWholeSurah
   );
 
-  $("#locationText").textContent =
-    "Jakarta, Indonesia";
-}
-
-
-async function fetchPrayerTimes(lat, lon) {
-
-  const now = new Date();
-
-  const day =
-    String(now.getDate()).padStart(2, "0");
-
-  const month =
-    String(now.getMonth() + 1).padStart(2, "0");
-
-  const year =
-    now.getFullYear();
-
-  const date =
-    `${day}-${month}-${year}`;
-
-  const url =
-    `${PRAYER_API}/timings/${date}` +
-    `?latitude=${lat}` +
-    `&longitude=${lon}` +
-    `&method=20` +
-    `&school=0`;
-
-  try {
-
-    const response =
-      await fetch(url);
-
-    const json =
-      await response.json();
-
-    state.prayers =
-      json.data.timings;
-
-    renderPrayerTimes();
-
-    updateNextPrayer();
-
-  } catch (error) {
-
-    console.error(error);
-
-    toast(
-      "Gagal mengambil waktu sholat"
-    );
-
-  }
-}
-
-
-const prayerMap = {
-  Fajr: "Subuh",
-  Dhuhr: "Dzuhur",
-  Asr: "Ashar",
-  Maghrib: "Maghrib",
-  Isha: "Isya"
-};
-
-
-function renderPrayerTimes() {
-
-  if (!state.prayers) return;
-
-  const list =
-    $("#prayerList");
-
-  list.innerHTML =
-    Object.entries(prayerMap)
-      .map(([key, name]) => {
-
-        return `
-
-          <div
-            class="prayer-row"
-            data-prayer="${key}"
-          >
-
-            <span class="symbol">☪</span>
-
-            <span class="name">
-              ${name}
-            </span>
-
-            <span class="time">
-              ${state.prayers[key]}
-            </span>
-
-          </div>
-
-        `;
-
-      }).join("");
-}
-
-
-function getPrayerObjects() {
-
-  if (!state.prayers) return [];
-
-  return Object.entries(prayerMap)
-    .map(([key, name]) => {
-
-      const [hour, minute] =
-        state.prayers[key]
-          .split(":")
-          .map(Number);
-
-      const date = new Date();
-
-      date.setHours(
-        hour,
-        minute,
-        0,
-        0
-      );
-
-      return {
-        key,
-        name,
-        time: state.prayers[key],
-        date
-      };
-
-    });
-}
-
-
-function updateNextPrayer() {
-
-  const prayers =
-    getPrayerObjects();
-
-  if (!prayers.length) return;
-
-  const now = new Date();
-
-  let next =
-    prayers.find(
-      prayer => prayer.date > now
-    );
-
-  if (!next) {
-
-    next = prayers[0];
-
-    next.date =
-      new Date(
-        next.date.getTime() +
-        86400000
-      );
-  }
-
-  $("#nextPrayerName").textContent =
-    next.name;
-
-  $("#nextPrayerTime").textContent =
-    next.time;
-
-  prayers.forEach(prayer => {
-
-    const row =
-      document.querySelector(
-        `[data-prayer="${prayer.key}"]`
-      );
-
-    if (row) {
-
-      row.classList.toggle(
-        "active",
-        prayer.key === next.key
-      );
-    }
-  });
-}
-
-
-function updateClock() {
-
-  updateNextPrayer();
-
-  const prayers =
-    getPrayerObjects();
-
-  if (!prayers.length) return;
-
-  const now = new Date();
-
-  let next =
-    prayers.find(
-      prayer => prayer.date > now
-    );
-
-  if (!next) {
-
-    next = prayers[0];
-
-    next.date =
-      new Date(
-        next.date.getTime() +
-        86400000
-      );
-  }
-
-  const diff =
-    next.date - now;
-
-  if (diff <= 0) return;
-
-  const totalSeconds =
-    Math.floor(diff / 1000);
-
-  const hours =
-    Math.floor(totalSeconds / 3600);
-
-  const minutes =
-    Math.floor(
-      (totalSeconds % 3600) / 60
-    );
-
-  const seconds =
-    totalSeconds % 60;
-
-  $("#countdown").textContent =
-    `${String(hours).padStart(2,"0")}:` +
-    `${String(minutes).padStart(2,"0")}:` +
-    `${String(seconds).padStart(2,"0")}`;
-}
+$("#pauseSurah")
+  ?.addEventListener(
+    "click",
+    pauseAudio
+  );
+
+$("#stopSurah")
+  ?.addEventListener(
+    "click",
+    stopAudio
+  );
 
 
 /* =========================================================
-   ADHAN ALARM
-   =========================================================
-
-   Browser mobile memiliki batasan autoplay.
-   User perlu mengaktifkan alarm / melakukan interaksi
-   terlebih dahulu agar audio dapat dimainkan.
+   NAVIGATION
    ========================================================= */
 
-const ADHAN_URL =
-  "https://cdn.islamic.network/adhan/adhan.mp3";
+function initNavigation() {
 
-let lastAlarmKey = "";
+  $$("[data-page]")
+    .forEach(btn => {
 
+      btn.addEventListener(
+        "click",
+        () => {
 
-$("#adhanToggle").addEventListener(
-  "change",
-  e => {
+          showPage(
+            btn.dataset.page
+          );
 
-    state.settings.adhan =
-      e.target.checked;
-
-    saveSettings();
-
-    if (e.target.checked) {
-
-      toast(
-        "Alarm Adzan aktif"
-      );
-
-    } else {
-
-      toast(
-        "Alarm Adzan dimatikan"
-      );
-    }
-  }
-);
-
-
-$("#testAdhan").addEventListener(
-  "click",
-  async () => {
-
-    try {
-
-      audio.src = ADHAN_URL;
-
-      await audio.play();
-
-      toast("Adzan sedang diputar");
-
-    } catch {
-
-      toast(
-        "Browser memblokir audio. Tekan tombol lagi."
-      );
-
-    }
-  }
-);
-
-
-function checkPrayerAlarm() {
-
-  if (!state.settings.adhan) return;
-
-  const prayers =
-    getPrayerObjects();
-
-  const now = new Date();
-
-  const current =
-    now.getHours() * 60 +
-    now.getMinutes();
-
-  prayers.forEach(prayer => {
-
-    const [hour, minute] =
-      prayer.time.split(":")
-        .map(Number);
-
-    const target =
-      hour * 60 + minute;
-
-    const key =
-      `${now.toDateString()}-${prayer.key}`;
-
-    if (
-      current === target &&
-      lastAlarmKey !== key
-    ) {
-
-      lastAlarmKey = key;
-
-      playAdhan();
-    }
-
-  });
-}
-
-
-function playAdhan() {
-
-  audio.src = ADHAN_URL;
-
-  audio.play()
-    .then(() => {
-
-      toast(
-        "🔊 Waktu " +
-        getCurrentPrayerName() +
-        " telah masuk"
-      );
-
-    })
-    .catch(() => {
-
-      toast(
-        "Waktu sholat masuk. Tekan layar untuk memutar Adzan."
+        }
       );
 
     });
-}
 
+  $("#readerBack")
+    ?.addEventListener(
+      "click",
+      () => showPage("quran")
+    );
 
-function getCurrentPrayerName() {
-
-  const prayers =
-    getPrayerObjects();
-
-  const now = new Date();
-
-  const current =
-    now.getHours() * 60 +
-    now.getMinutes();
-
-  const prayer =
-    prayers.find(p => {
-
-      const [h,m] =
-        p.time.split(":").map(Number);
-
-      return h * 60 + m === current;
-    });
-
-  return prayer?.name || "sholat";
-}
-
-
-/* =========================================================
-   TAJWID LESSONS
-   ========================================================= */
-
-const lessons = {
-
-  nun: {
-    title: "Nun Sukun & Tanwin",
-
-    description:
-      "Nun sukun (نْ) dan tanwin memiliki beberapa hukum bacaan berdasarkan huruf setelahnya.",
-
-    rules: [
-      "Izhar Halqi — dibaca jelas ketika bertemu ء ه ع ح غ خ.",
-      "Idgham — melebur ke huruf tertentu.",
-      "Iqlab — nun/tanwin berubah menjadi mim ketika bertemu ب.",
-      "Ikhfa — dibaca samar dengan dengung pada huruf-huruf tertentu."
-    ],
-
-    example:
-      "مِنْ بَعْدِ"
-  },
-
-  mim: {
-    title: "Mim Sukun",
-
-    description:
-      "Mim sukun memiliki tiga hukum utama.",
-
-    rules: [
-      "Ikhfa Syafawi — mim sukun bertemu ب.",
-      "Idgham Mimi — mim sukun bertemu م.",
-      "Izhar Syafawi — mim sukun bertemu selain ب dan م."
-    ],
-
-    example:
-      "تَرْمِيهِمْ بِحِجَارَةٍ"
-  },
-
-  mad: {
-    title: "Mad",
-
-    description:
-      "Mad adalah memanjangkan suara pada huruf mad sesuai hukum dan jumlah harakatnya.",
-
-    rules: [
-      "Mad Thabi'i — umumnya 2 harakat.",
-      "Mad Wajib Muttasil — huruf mad bertemu hamzah dalam satu kata.",
-      "Mad Jaiz Munfasil — huruf mad bertemu hamzah di kata berikutnya.",
-      "Mad Lazim — memiliki panjang bacaan tertentu sesuai jenisnya."
-    ],
-
-    example:
-      "جَاءَ"
-  },
-
-  ghunnah: {
-    title: "Ghunnah",
-
-    description:
-      "Ghunnah adalah suara dengung yang keluar dari khaisyum (rongga hidung). Pada nun dan mim bertasydid, ghunnah dibaca dengan jelas.",
-
-    rules: [
-      "Nun tasydid نّ memiliki ghunnah.",
-      "Mim tasydid مّ memiliki ghunnah.",
-      "Ikhfa juga memiliki karakter dengung.",
-      "Durasi bacaan harus mengikuti kaidah tajwid yang dipelajari."
-    ],
-
-    example:
-      "إِنَّ — ثُمَّ"
-  },
-
-  qalqalah: {
-    title: "Qalqalah",
-
-    description:
-      "Qalqalah adalah pantulan suara pada huruf ق ط ب ج د ketika huruf tersebut sukun.",
-
-    rules: [
-      "Qalqalah Sughra terjadi ketika huruf qalqalah bersukun di tengah bacaan.",
-      "Qalqalah Kubra terjadi ketika berhenti pada huruf qalqalah.",
-      "Pantulan tidak boleh berubah menjadi harakat baru."
-    ],
-
-    example:
-      "يَجْعَلْ"
-  },
-
-  waqaf: {
-    title: "Waqaf",
-
-    description:
-      "Waqaf adalah berhenti pada bacaan. Tanda-tanda waqaf membantu pembaca menentukan tempat berhenti yang tepat.",
-
-    rules: [
-      "م — waqaf lazim.",
-      "لا — jangan berhenti.",
-      "ج — boleh berhenti atau meneruskan.",
-      "قلى — lebih baik berhenti.",
-      "صلى — lebih baik meneruskan."
-    ],
-
-    example:
-      "الْعَالَمِينَ ۝"
-  }
-
-};
-
-
-function bindLessons() {
-
-  $$(".lesson-card").forEach(card => {
-
-    card.addEventListener(
+  $("#continueBtn")
+    ?.addEventListener(
       "click",
       () => {
 
-        const key =
-          card.dataset.lesson;
+        const last =
+          Number(
+            localStorage.getItem(
+              "nurq_last_surah"
+            ) || 1
+          );
 
-        openLesson(key);
-
+        openSurah(last);
       }
     );
+}
 
+
+function showPage(page) {
+
+  $$(".page")
+    .forEach(
+      p =>
+        p.classList.remove(
+          "active"
+        )
+    );
+
+  const target =
+    $(`#${page}Page`);
+
+  if (target) {
+
+    target.classList.add(
+      "active"
+    );
+  }
+
+  $$(".nav-item")
+    .forEach(btn => {
+
+      btn.classList.toggle(
+        "active",
+        btn.dataset.page === page
+      );
+
+    });
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
   });
 }
 
 
-function openLesson(key) {
+/* =========================================================
+   SEARCH
+   ========================================================= */
 
-  const lesson =
-    lessons[key];
+function initSearch() {
 
-  if (!lesson) return;
+  $("#surahSearch")
+    ?.addEventListener(
+      "input",
+      e => {
 
-  $("#lessonContent").innerHTML = `
+        renderSurahs(
+          e.target.value
+        );
 
-    <div class="lesson-detail">
+      }
+    );
 
-      <span class="section-kicker">
-        BELAJAR TAJWID
-      </span>
-
-      <h2>
-        ${lesson.title}
-      </h2>
-
-      <p>
-        ${lesson.description}
-      </p>
-
-      <div class="example-arabic">
-        ${lesson.example}
-      </div>
-
-      ${lesson.rules.map(rule => `
-
-        <div class="rule-box">
-          ✓ ${rule}
-        </div>
-
-      `).join("")}
-
-      <button
-        class="adhan-test"
-        id="lessonPlay"
-        style="margin-top:16px"
-      >
-        🔊 Dengarkan contoh
-      </button>
-
-    </div>
-  `;
-
-  $("#lessonModal")
-    .classList.add("show");
-
-  $("#lessonPlay")
-    .addEventListener(
+  $("#searchSurahBtn")
+    ?.addEventListener(
       "click",
-      () => speakArabic(
-        lesson.example
-      )
+      () => {
+
+        const box =
+          $("#surahSearchBox");
+
+        box.scrollIntoView({
+          behavior: "smooth"
+        });
+
+        setTimeout(
+          () => {
+            $("#surahSearch")
+              ?.focus();
+          },
+          300
+        );
+
+      }
     );
 }
 
 
 /* =========================================================
-   SIMPLE ARABIC TTS
-   =========================================================
-
-   Ini hanya alat bantu pembelajaran.
-   Jangan menganggap browser TTS sebagai pengganti
-   rekaman qari untuk tajwid.
+   BOOKMARK
    ========================================================= */
 
-function speakArabic(text) {
+function saveCurrentAyah(
+  index
+) {
 
-  if (!("speechSynthesis" in window)) {
+  if (!state.current) return;
 
-    toast(
-      "Browser tidak mendukung suara TTS"
-    );
-
-    return;
-  }
-
-  speechSynthesis.cancel();
-
-  const utterance =
-    new SpeechSynthesisUtterance(text);
-
-  utterance.lang = "ar-SA";
-  utterance.rate = .72;
-  utterance.pitch = 1;
-
-  speechSynthesis.speak(
-    utterance
-  );
-}
-
-
-/* =========================================================
-   BOOKMARKS
-   ========================================================= */
-
-function saveBookmark(ayah) {
+  const ayah =
+    state.current
+      .arabic
+      .ayahs[index];
 
   const exists =
     state.bookmarks.some(
-      item => item.number === ayah.number
+      item =>
+        item.globalNumber ===
+        ayah.number
     );
 
   if (exists) {
 
     state.bookmarks =
       state.bookmarks.filter(
-        item => item.number !== ayah.number
+        item =>
+          item.globalNumber !==
+          ayah.number
       );
 
-    toast("Dihapus dari tersimpan");
+    toast(
+      "Ayat dihapus dari tersimpan"
+    );
 
   } else {
 
     state.bookmarks.push({
-      number: ayah.number,
-      surah: state.currentSurah.arabic.englishName,
-      ayah: ayah.numberInSurah,
-      text: ayah.text
+      globalNumber:
+        ayah.number,
+
+      surah:
+        state.current
+          .arabic
+          .englishName,
+
+      ayah:
+        ayah.numberInSurah,
+
+      text:
+        ayah.text
     });
 
-    toast("Ayat disimpan 🔖");
+    toast(
+      "Ayat berhasil disimpan 🔖"
+    );
   }
 
   localStorage.setItem(
     "nurq_bookmarks",
-    JSON.stringify(state.bookmarks)
+    JSON.stringify(
+      state.bookmarks
+    )
   );
 
   renderBookmarks();
@@ -1235,8 +1068,20 @@ function renderBookmarks() {
 
     container.innerHTML = `
       <div class="bookmark-empty">
-        <div style="font-size:40px">🔖</div>
-        <p>Belum ada ayat tersimpan.</p>
+
+        <div
+          style="
+            font-size:45px;
+            margin-bottom:10px;
+          "
+        >
+          🔖
+        </div>
+
+        <p>
+          Belum ada ayat tersimpan.
+        </p>
+
       </div>
     `;
 
@@ -1244,7 +1089,8 @@ function renderBookmarks() {
   }
 
   container.innerHTML =
-    state.bookmarks.map(item => `
+    state.bookmarks.map(
+      item => `
 
       <article class="ayah">
 
@@ -1252,12 +1098,13 @@ function renderBookmarks() {
 
           <span class="ayah-number">
             ${escapeHTML(item.surah)}
-            • ${item.ayah}
+            •
+            ${item.ayah}
           </span>
 
           <button
             class="ayah-play"
-            data-bookmark-play="${item.number}"
+            data-bookmark-audio="${item.globalNumber}"
           >
             ▶
           </button>
@@ -1269,27 +1116,37 @@ function renderBookmarks() {
         </div>
 
       </article>
+    `
+    ).join("");
 
-    `).join("");
+  $$("[data-bookmark-audio]")
+    .forEach(btn => {
 
-  $$("[data-bookmark-play]").forEach(button => {
+      btn.onclick = async () => {
 
-    button.addEventListener(
-      "click",
-      () => {
+        audio.pause();
 
         audio.src =
-          getAudioURL(
+          audioURL(
             Number(
-              button.dataset.bookmarkPlay
+              btn.dataset.bookmarkAudio
             )
           );
 
-        audio.play();
-      }
-    );
+        try {
 
-  });
+          await audio.play();
+
+        } catch {
+
+          toast(
+            "Tekan tombol lagi untuk memutar"
+          );
+        }
+
+      };
+
+    });
 }
 
 
@@ -1297,297 +1154,490 @@ function renderBookmarks() {
    SETTINGS
    ========================================================= */
 
-function bindSettings() {
+function initSettings() {
 
-  $("#settingsBtn").addEventListener(
-    "click",
-    () => {
-      $("#settingsModal")
-        .classList.add("show");
-    }
-  );
+  $("#settingsBtn")
+    ?.addEventListener(
+      "click",
+      () => {
+
+        $("#settingsModal")
+          ?.classList.add("show");
+
+      }
+    );
 
   $("#animationToggle")
-    .addEventListener(
+    ?.addEventListener(
       "change",
       e => {
 
-        state.settings.animation =
-          e.target.checked;
-
-        saveSettings();
+        localStorage.setItem(
+          "nurq_animation",
+          e.target.checked
+        );
       }
     );
 
   $("#autoNextToggle")
-    .addEventListener(
+    ?.addEventListener(
       "change",
       e => {
 
-        state.settings.autoNext =
+        state.autoNext =
           e.target.checked;
 
-        saveSettings();
+        localStorage.setItem(
+          "nurq_auto_next",
+          e.target.checked
+        );
       }
     );
 
   $("#fontPlus")
-    .addEventListener(
+    ?.addEventListener(
       "click",
       () => {
 
-        state.settings.fontSize =
+        state.fontSize =
           Math.min(
             50,
-            state.settings.fontSize + 2
+            state.fontSize + 2
           );
 
-        updateFont();
+        applyFont();
       }
     );
 
   $("#fontMinus")
-    .addEventListener(
+    ?.addEventListener(
       "click",
       () => {
 
-        state.settings.fontSize =
+        state.fontSize =
           Math.max(
             20,
-            state.settings.fontSize - 2
+            state.fontSize - 2
           );
 
-        updateFont();
+        applyFont();
       }
     );
-
-  $$(".modal [data-close]")
-    .forEach(button => {
-
-      button.addEventListener(
-        "click",
-        () => {
-
-          button.closest(".modal")
-            .classList.remove("show");
-
-        }
-      );
-
-    });
-
-  $$(".modal").forEach(modal => {
-
-    modal.addEventListener(
-      "click",
-      e => {
-
-        if (e.target === modal) {
-
-          modal.classList.remove(
-            "show"
-          );
-        }
-
-      }
-    );
-
-  });
 }
 
 
-function updateFont() {
+function applyFont() {
 
-  document.documentElement.style
+  document.documentElement
+    .style
     .setProperty(
       "--arabic-size",
-      `${state.settings.fontSize}px`
+      `${state.fontSize}px`
     );
 
-  $("#fontValue").textContent =
-    state.settings.fontSize;
+  if ($("#fontValue")) {
 
-  saveSettings();
-}
-
-
-function loadSettings() {
-
-  const saved =
-    JSON.parse(
-      localStorage.getItem(
-        "nurq_settings"
-      ) || "null"
-    );
-
-  if (saved) {
-
-    state.settings = {
-      ...state.settings,
-      ...saved
-    };
+    $("#fontValue")
+      .textContent =
+      state.fontSize;
   }
 
-  $("#animationToggle").checked =
-    state.settings.animation;
-
-  $("#autoNextToggle").checked =
-    state.settings.autoNext;
-
-  $("#adhanToggle").checked =
-    state.settings.adhan;
-
-  updateFont();
-}
-
-
-function saveSettings() {
-
   localStorage.setItem(
-    "nurq_settings",
-    JSON.stringify(
-      state.settings
-    )
+    "nurq_font_size",
+    state.fontSize
   );
 }
 
 
 /* =========================================================
-   GLOBAL BUTTONS
+   MODAL
    ========================================================= */
 
-function bindGlobalButtons() {
+function initModals() {
+
+  $$("[data-close]")
+    .forEach(btn => {
+
+      btn.onclick = () => {
+
+        btn.closest(".modal")
+          ?.classList.remove(
+            "show"
+          );
+      };
+
+    });
+
+  $$(".modal")
+    .forEach(modal => {
+
+      modal.addEventListener(
+        "click",
+        e => {
+
+          if (
+            e.target === modal
+          ) {
+
+            modal.classList.remove(
+              "show"
+            );
+          }
+
+        }
+      );
+
+    });
+}
+
+
+/* =========================================================
+   PRAYER
+   ========================================================= */
+
+async function initPrayer() {
 
   $("#refreshPrayer")
-    .addEventListener(
+    ?.addEventListener(
       "click",
-      () => loadPrayerTimes()
+      loadPrayerTimes
     );
 
   $("#locationBtn")
-    .addEventListener(
+    ?.addEventListener(
       "click",
-      () => {
+      requestLocation
+    );
+}
 
-        if (!navigator.geolocation) {
 
-          toast(
-            "GPS tidak tersedia"
-          );
+async function loadPrayerTimes() {
 
-          return;
-        }
+  if (!navigator.geolocation) {
+
+    await prayerFromCoordinates(
+      -6.2,
+      106.816666,
+      "Jakarta, Indonesia"
+    );
+
+    return;
+  }
+
+  navigator.geolocation
+    .getCurrentPosition(
+      async position => {
+
+        await prayerFromCoordinates(
+          position.coords.latitude,
+          position.coords.longitude,
+          "Lokasi perangkat"
+        );
+
+      },
+
+      async () => {
+
+        await prayerFromCoordinates(
+          -6.2,
+          106.816666,
+          "Jakarta, Indonesia"
+        );
+
+      },
+
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000
+      }
+    );
+}
+
+
+function requestLocation() {
+
+  if (!navigator.geolocation) {
+
+    toast(
+      "GPS tidak tersedia"
+    );
+
+    return;
+  }
+
+  navigator.geolocation
+    .getCurrentPosition(
+      async position => {
+
+        await prayerFromCoordinates(
+          position.coords.latitude,
+          position.coords.longitude,
+          "Lokasi perangkat"
+        );
 
         toast(
-          "Meminta lokasi..."
+          "Lokasi diperbarui"
         );
 
-        navigator.geolocation.getCurrentPosition(
-          async position => {
+      },
 
-            state.coordinates = {
-              lat:
-                position.coords.latitude,
-              lon:
-                position.coords.longitude
-            };
+      () => {
 
-            $("#locationText")
-              .textContent =
-              "Lokasi perangkat";
-
-            await fetchPrayerTimes(
-              position.coords.latitude,
-              position.coords.longitude
-            );
-
-            toast(
-              "Lokasi diperbarui"
-            );
-          },
-          () => {
-            toast(
-              "Izin lokasi ditolak"
-            );
-          }
+        toast(
+          "Izin lokasi ditolak"
         );
 
       }
     );
+}
 
-  $("#searchSurahBtn")
-    .addEventListener(
-      "click",
-      () => {
 
-        const box =
-          $("#surahSearchBox");
+async function prayerFromCoordinates(
+  lat,
+  lon,
+  locationName
+) {
 
-        box.scrollIntoView({
-          behavior: "smooth"
-        });
+  try {
 
-        $("#surahSearch").focus();
-      }
+    const now =
+      new Date();
+
+    const dd =
+      String(
+        now.getDate()
+      ).padStart(2,"0");
+
+    const mm =
+      String(
+        now.getMonth() + 1
+      ).padStart(2,"0");
+
+    const yyyy =
+      now.getFullYear();
+
+    const url =
+      `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}` +
+      `?latitude=${lat}` +
+      `&longitude=${lon}` +
+      `&method=20`;
+
+    const response =
+      await fetch(url);
+
+    const json =
+      await response.json();
+
+    if (
+      !json.data ||
+      !json.data.timings
+    ) {
+
+      throw new Error(
+        "Prayer API error"
+      );
+    }
+
+    window.prayerData =
+      json.data.timings;
+
+    $("#locationText")
+      && (
+        $("#locationText")
+          .textContent =
+          locationName
+      );
+
+    renderPrayer(
+      json.data.timings
     );
 
-  $("#continueBtn")
-    .addEventListener(
-      "click",
-      () => {
+    updateNextPrayer();
 
-        const last =
-          Number(
-            localStorage.getItem(
-              "nurq_last_surah"
-            ) || 1
-          );
+  } catch (error) {
 
-        openSurah(last);
-      }
+    console.error(
+      error
     );
 
-  $$("[data-demo-audio]")
-    .forEach(button => {
+    toast(
+      "Gagal memuat jadwal sholat"
+    );
+  }
+}
 
-      button.addEventListener(
-        "click",
-        () => {
 
-          audio.src =
-            getAudioURL(94);
+function renderPrayer(
+  timings
+) {
 
-          audio.play();
+  const map = {
+    Fajr: "Subuh",
+    Dhuhr: "Dzuhur",
+    Asr: "Ashar",
+    Maghrib: "Maghrib",
+    Isha: "Isya"
+  };
 
-        }
+  const list =
+    $("#prayerList");
+
+  if (!list) return;
+
+  list.innerHTML =
+    Object.entries(map)
+      .map(
+        ([key,name]) => `
+
+        <div
+          class="prayer-row"
+          data-prayer="${key}"
+        >
+
+          <span class="symbol">
+            ☪
+          </span>
+
+          <span class="name">
+            ${name}
+          </span>
+
+          <span class="time">
+            ${timings[key]}
+          </span>
+
+        </div>
+
+      `
+      )
+      .join("");
+}
+
+
+function updateNextPrayer() {
+
+  const timings =
+    window.prayerData;
+
+  if (!timings) return;
+
+  const prayers = [
+    ["Fajr","Subuh"],
+    ["Dhuhr","Dzuhur"],
+    ["Asr","Ashar"],
+    ["Maghrib","Maghrib"],
+    ["Isha","Isya"]
+  ];
+
+  const now =
+    new Date();
+
+  const current =
+    now.getHours() * 60 +
+    now.getMinutes();
+
+  let next = null;
+
+  for (
+    const [key,name]
+    of prayers
+  ) {
+
+    const [h,m] =
+      timings[key]
+        .split(":")
+        .map(Number);
+
+    const value =
+      h * 60 + m;
+
+    if (value > current) {
+
+      next = {
+        key,
+        name,
+        time: timings[key],
+        value
+      };
+
+      break;
+    }
+  }
+
+  if (!next) {
+
+    next = {
+      key: "Fajr",
+      name: "Subuh",
+      time: timings.Fajr
+    };
+  }
+
+  if ($("#nextPrayerName")) {
+
+    $("#nextPrayerName")
+      .textContent =
+      next.name;
+  }
+
+  if ($("#nextPrayerTime")) {
+
+    $("#nextPrayerTime")
+      .textContent =
+      next.time;
+  }
+
+  $$(".prayer-row")
+    .forEach(row => {
+
+      row.classList.toggle(
+        "active",
+        row.dataset.prayer ===
+          next.key
       );
 
     });
+}
 
-  $$("[data-bookmark]")
-    .forEach(button => {
 
-      button.addEventListener(
-        "click",
-        () => {
+/* =========================================================
+   TOAST
+   ========================================================= */
 
-          if (!state.currentSurah) {
+let toastTimer;
 
-            toast(
-              "Buka surah terlebih dahulu"
-            );
+function toast(
+  message
+) {
 
-            return;
-          }
+  const element =
+    $("#toast");
 
-          saveBookmark(
-            state.currentSurah.arabic.ayahs[0]
-          );
+  if (!element) return;
 
-        }
-      );
+  element.textContent =
+    message;
 
-    });
+  element.classList.add(
+    "show"
+  );
+
+  clearTimeout(
+    toastTimer
+  );
+
+  toastTimer =
+    setTimeout(
+      () => {
+
+        element.classList.remove(
+          "show"
+        );
+
+      },
+      2500
+    );
 }
 
 
@@ -1595,47 +1645,48 @@ function bindGlobalButtons() {
    UTILITIES
    ========================================================= */
 
-function toast(message) {
+function stripHTML(
+  html
+) {
 
-  const el =
-    $("#toast");
+  const temp =
+    document.createElement(
+      "div"
+    );
 
-  el.textContent =
-    message;
-
-  el.classList.add("show");
-
-  clearTimeout(
-    toast.timer
-  );
-
-  toast.timer =
-    setTimeout(() => {
-
-      el.classList.remove("show");
-
-    }, 2500);
-}
-
-
-function stripHTML(html) {
-
-  const div =
-    document.createElement("div");
-
-  div.innerHTML =
+  temp.innerHTML =
     html || "";
 
-  return div.textContent || "";
+  return temp.textContent ||
+    "";
 }
 
 
-function escapeHTML(value) {
+function escapeHTML(
+  value
+) {
 
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+  return String(
+    value ?? ""
+  )
+    .replaceAll(
+      "&",
+      "&amp;"
+    )
+    .replaceAll(
+      "<",
+      "&lt;"
+    )
+    .replaceAll(
+      ">",
+      "&gt;"
+    )
+    .replaceAll(
+      '"',
+      "&quot;"
+    )
+    .replaceAll(
+      "'",
+      "&#039;"
+    );
+   }
