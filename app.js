@@ -1,6 +1,6 @@
 /* =========================================================
-   NURQ V2
-   Quran Reader + Latin + Translation + Auto Recitation
+   NURQ V3
+   AYAT AUDIO + TIMEZONE + ADHAN + 3D INTERACTION
    ========================================================= */
 
 const QURAN_API = "https://api.alquran.cloud/v1";
@@ -8,32 +8,77 @@ const QURAN_API = "https://api.alquran.cloud/v1";
 const AUDIO_BASE =
   "https://cdn.islamic.network/quran/audio/128/ar.alafasy";
 
+const ADHAN_URL =
+  "https://cdn.islamic.network/adhan/adhan.mp3";
+
+const TIMEZONE_CONFIG = {
+  WIB: {
+    label: "WIB",
+    name: "Waktu Indonesia Barat",
+    offset: 7
+  },
+
+  WITA: {
+    label: "WITA",
+    name: "Waktu Indonesia Tengah",
+    offset: 8
+  },
+
+  WIT: {
+    label: "WIT",
+    name: "Waktu Indonesia Timur",
+    offset: 9
+  }
+};
+
 const state = {
   surahs: [],
   current: null,
   currentIndex: 0,
+
   playing: false,
   autoNext: true,
+
+  adhanEnabled: false,
+  lastAdhanKey: "",
+
+  timezone:
+    localStorage.getItem("nurq_timezone") ||
+    null,
+
   bookmarks: JSON.parse(
-    localStorage.getItem("nurq_bookmarks") || "[]"
+    localStorage.getItem(
+      "nurq_bookmarks"
+    ) || "[]"
   ),
+
   fontSize: Number(
-    localStorage.getItem("nurq_font_size") || 30
+    localStorage.getItem(
+      "nurq_font_size"
+    ) || 30
   )
 };
 
 const audio =
-  document.getElementById("audioPlayer");
+  document.getElementById(
+    "audioPlayer"
+  );
 
-const $ = s =>
-  document.querySelector(s);
+const $ =
+  selector =>
+    document.querySelector(
+      selector
+    );
 
-const $$ = s =>
-  [...document.querySelectorAll(s)];
+const $$ =
+  selector =>
+    [...document.querySelectorAll(
+      selector
+    )];
 
 
 /* =========================================================
-   START
+   INIT
    ========================================================= */
 
 document.addEventListener(
@@ -41,38 +86,173 @@ document.addEventListener(
   async () => {
 
     initNavigation();
-    initSettings();
     initSearch();
+    initSettings();
     initModals();
     initPrayer();
+    initAyahButtons();
+    initDailyVerse();
 
     applyFont();
 
+    /*
+      First entry timezone selector
+    */
+    if (!state.timezone) {
+      showTimezoneSelector();
+    }
+
     await loadSurahs();
 
-    loadPrayerTimes();
+    await loadPrayerTimes();
 
-    renderBookmarks();
+    startPrayerClock();
+
+    registerServiceWorker();
 
     console.log(
-      "NurQ V2 berhasil dimulai"
+      "NurQ V3 ready"
     );
   }
 );
 
 
 /* =========================================================
-   SAFE FETCH
+   TIMEZONE FIRST ENTRY
    ========================================================= */
 
-async function api(url) {
+function showTimezoneSelector() {
+
+  const modal =
+    document.createElement(
+      "div"
+    );
+
+  modal.id =
+    "timezoneModal";
+
+  modal.className =
+    "modal show";
+
+  modal.innerHTML = `
+
+    <div class="modal-sheet timezone-sheet">
+
+      <div class="timezone-icon">
+        🕌
+      </div>
+
+      <span class="section-kicker">
+        PENGATURAN AWAL
+      </span>
+
+      <h2>
+        Pilih zona waktu
+      </h2>
+
+      <p class="timezone-description">
+        Zona waktu digunakan untuk
+        menentukan waktu sholat dan
+        alarm Adzan.
+      </p>
+
+      <div class="timezone-options">
+
+        ${Object.entries(
+          TIMEZONE_CONFIG
+        ).map(
+          ([key,item]) => `
+
+          <button
+            class="timezone-option"
+            data-timezone="${key}"
+          >
+
+            <div class="timezone-icon-small">
+              ${key === "WIB"
+                ? "🌅"
+                : key === "WITA"
+                  ? "☀️"
+                  : "🌇"}
+            </div>
+
+            <div>
+              <strong>
+                ${item.label}
+              </strong>
+
+              <span>
+                ${item.name}
+              </span>
+            </div>
+
+            <b>
+              ›
+            </b>
+
+          </button>
+
+        `
+        ).join("")}
+
+      </div>
+
+      <small class="timezone-note">
+        Kamu dapat mengubahnya kembali
+        melalui Pengaturan.
+      </small>
+
+    </div>
+  `;
+
+  document.body.appendChild(
+    modal
+  );
+
+  $$(".timezone-option")
+    .forEach(button => {
+
+      button.onclick = async () => {
+
+        const timezone =
+          button.dataset.timezone;
+
+        state.timezone =
+          timezone;
+
+        localStorage.setItem(
+          "nurq_timezone",
+          timezone
+        );
+
+        modal.remove();
+
+        toast(
+          `Zona waktu ${timezone} dipilih`
+        );
+
+        await loadPrayerTimes();
+      };
+
+    });
+}
+
+
+/* =========================================================
+   QURAN API
+   ========================================================= */
+
+async function api(
+  url
+) {
 
   const controller =
     new AbortController();
 
   const timeout =
     setTimeout(
-      () => controller.abort(),
+      () =>
+        controller.abort(),
       15000
     );
 
@@ -84,7 +264,8 @@ async function api(url) {
         {
           signal:
             controller.signal,
-          cache: "no-store"
+          cache:
+            "no-store"
         }
       );
 
@@ -97,9 +278,11 @@ async function api(url) {
     const json =
       await response.json();
 
-    if (!json || json.code !== 200) {
+    if (
+      !json ||
+      json.code !== 200
+    ) {
       throw new Error(
-        json?.status ||
         "API error"
       );
     }
@@ -108,7 +291,9 @@ async function api(url) {
 
   } finally {
 
-    clearTimeout(timeout);
+    clearTimeout(
+      timeout
+    );
   }
 }
 
@@ -126,9 +311,7 @@ async function loadSurahs() {
 
     list.innerHTML = `
       <div class="bookmark-empty">
-        <div style="font-size:32px">
-          ⏳
-        </div>
+        ⏳
         <p>
           Memuat 114 surah...
         </p>
@@ -148,7 +331,6 @@ async function loadSurahs() {
   } catch (error) {
 
     console.error(
-      "SURAH ERROR:",
       error
     );
 
@@ -157,34 +339,30 @@ async function loadSurahs() {
       list.innerHTML = `
         <div class="bookmark-empty">
 
-          <div style="font-size:35px">
+          <div style="font-size:40px">
             ⚠️
           </div>
 
           <p>
-            Gagal memuat daftar surah.
+            Gagal memuat surah.
           </p>
 
           <button
-            id="retrySurah"
             class="adhan-test"
+            id="retrySurahs"
           >
-            Coba lagi
+            Coba Lagi
           </button>
 
         </div>
       `;
 
-      $("#retrySurah")
+      $("#retrySurahs")
         ?.addEventListener(
           "click",
           loadSurahs
         );
     }
-
-    toast(
-      "Internet/API tidak dapat diakses"
-    );
   }
 }
 
@@ -203,7 +381,7 @@ function renderSurahs(
       .toLowerCase()
       .trim();
 
-  const data =
+  const filtered =
     state.surahs.filter(
       s =>
         !q ||
@@ -217,19 +395,8 @@ function renderSurahs(
           .includes(q)
     );
 
-  if (!data.length) {
-
-    list.innerHTML = `
-      <div class="bookmark-empty">
-        Surah tidak ditemukan.
-      </div>
-    `;
-
-    return;
-  }
-
   list.innerHTML =
-    data.map(
+    filtered.map(
       s => `
 
       <button
@@ -237,7 +404,7 @@ function renderSurahs(
         data-open-surah="${s.number}"
       >
 
-        <div class="surah-number">
+        <div class="surah-number icon-3d">
           ${s.number}
         </div>
 
@@ -259,7 +426,9 @@ function renderSurahs(
         </div>
 
         <div class="surah-arabic">
-          ${escapeHTML(s.name)}
+          ${escapeHTML(
+            s.name
+          )}
         </div>
 
       </button>
@@ -267,17 +436,18 @@ function renderSurahs(
     ).join("");
 
   $$("[data-open-surah]")
-    .forEach(btn => {
+    .forEach(button => {
 
-      btn.onclick = () => {
+      button.onclick =
+        () => {
 
-        openSurah(
-          Number(
-            btn.dataset.openSurah
-          )
-        );
+          openSurah(
+            Number(
+              button.dataset.openSurah
+            )
+          );
 
-      };
+        };
 
     });
 }
@@ -295,53 +465,41 @@ async function openSurah(
 
   $("#ayahList").innerHTML = `
     <div class="bookmark-empty">
-      <div style="font-size:32px">
+      <div style="font-size:40px">
         📖
       </div>
 
       <p>
-        Memuat bacaan...
+        Memuat ayat...
       </p>
     </div>
   `;
 
   try {
 
-    /*
-      IMPORTANT:
-      Jangan meminta tiga edition sekaligus.
-      Ambil masing-masing secara terpisah.
-    */
-
-    const arabicPromise =
-      api(
-        `${QURAN_API}/surah/${number}/quran-uthmani`
-      );
-
-    const latinPromise =
-      api(
-        `${QURAN_API}/surah/${number}/en.transliteration`
-      ).catch(
-        () => null
-      );
-
-    const indoPromise =
-      api(
-        `${QURAN_API}/surah/${number}/id.indonesian`
-      ).catch(
-        () => null
-      );
-
     const [
       arabic,
       latin,
       indo
-    ] =
-      await Promise.all([
-        arabicPromise,
-        latinPromise,
-        indoPromise
-      ]);
+    ] = await Promise.all([
+
+      api(
+        `${QURAN_API}/surah/${number}/quran-uthmani`
+      ),
+
+      api(
+        `${QURAN_API}/surah/${number}/en.transliteration`
+      ).catch(
+        () => null
+      ),
+
+      api(
+        `${QURAN_API}/surah/${number}/id.indonesian`
+      ).catch(
+        () => null
+      )
+
+    ]);
 
     state.current = {
       arabic,
@@ -351,7 +509,20 @@ async function openSurah(
 
     state.currentIndex = 0;
 
-    renderReader();
+    $("#readerTitle").textContent =
+      arabic.englishName;
+
+    $("#readerArabicName").textContent =
+      arabic.name;
+
+    $("#readerTranslation").textContent =
+      arabic.englishNameTranslation;
+
+    $("#readerInfo").textContent =
+      `${arabic.revelationType} • ` +
+      `${arabic.numberOfAyahs} ayat`;
+
+    renderAyahs();
 
     localStorage.setItem(
       "nurq_last_surah",
@@ -361,7 +532,7 @@ async function openSurah(
   } catch (error) {
 
     console.error(
-      "OPEN SURAH ERROR:",
+      "SURAH ERROR:",
       error
     );
 
@@ -373,12 +544,12 @@ async function openSurah(
         </div>
 
         <p>
-          Bacaan surah gagal dimuat.
+          Gagal memuat ayat.
         </p>
 
         <button
           class="adhan-test"
-          id="retryCurrentSurah"
+          onclick="openSurah(${number})"
         >
           Muat ulang
         </button>
@@ -386,197 +557,187 @@ async function openSurah(
       </div>
     `;
 
-    $("#retryCurrentSurah")
-      ?.addEventListener(
-        "click",
-        () => openSurah(number)
-      );
-
-    toast(
-      "Gagal memuat bacaan"
-    );
   }
 }
 
 
 /* =========================================================
-   RENDER READER
+   AYAT RENDER
    ========================================================= */
 
-function renderReader() {
+function renderAyahs() {
 
-  const {
-    arabic,
-    latin,
-    indo
-  } = state.current;
+  const arabic =
+    state.current.arabic;
 
-  $("#readerTitle").textContent =
-    arabic.englishName;
+  const latin =
+    state.current.latin;
 
-  $("#readerArabicName").textContent =
-    arabic.name;
-
-  $("#readerTranslation").textContent =
-    arabic.englishNameTranslation;
-
-  $("#readerInfo").textContent =
-    `${arabic.revelationType} • ` +
-    `${arabic.numberOfAyahs} ayat`;
+  const indo =
+    state.current.indo;
 
   $("#ayahList").innerHTML =
     arabic.ayahs.map(
-      (ayah, index) => {
+      (ayah,index) => {
 
         const latinText =
-          latin?.ayahs?.[index]?.text ||
-          "Latin tidak tersedia";
+          latin?.ayahs?.[index]
+            ?.text ||
+          "";
 
-        const indoText =
-          indo?.ayahs?.[index]?.text ||
-          "Terjemahan tidak tersedia";
+        const translation =
+          indo?.ayahs?.[index]
+            ?.text ||
+          "";
 
         return `
 
-          <article
-            class="ayah"
-            id="ayah-${index}"
-            data-ayah-index="${index}"
-          >
+        <article
+          class="ayah"
+          id="ayah-${index}"
+          data-index="${index}"
+        >
 
-            <div class="ayah-head">
+          <div class="ayah-head">
 
-              <span class="ayah-number">
-                ۞
-                ${ayah.numberInSurah}
-              </span>
+            <span class="ayah-number">
+              ۞
+              ${ayah.numberInSurah}
+            </span>
 
-              <button
-                class="ayah-play"
-                data-play-ayah="${index}"
-              >
-                ▶
-              </button>
-
-            </div>
-
-            <div class="ayah-arabic">
-
-              ${escapeHTML(
-                ayah.text
-              )}
-
-            </div>
-
-            <div class="ayah-latin">
-
-              ${escapeHTML(
-                latinText
-              )}
-
-            </div>
-
-            <div class="ayah-translation">
-
-              ${escapeHTML(
-                stripHTML(indoText)
-              )}
-
-            </div>
-
-            <div
-              style="
-                display:flex;
-                gap:8px;
-                margin-top:12px;
-              "
+            <button
+              class="ayah-play icon-3d-button"
+              data-ayah-play="${index}"
+              aria-label="Putar ayat"
             >
+              ▶
+            </button>
 
-              <button
-                class="round-btn"
-                data-play-ayah="${index}"
-              >
-                🔊
-              </button>
+          </div>
 
-              <button
-                class="round-btn"
-                data-save-ayah="${index}"
-              >
-                🔖
-              </button>
+          <div class="ayah-arabic">
+            ${escapeHTML(
+              ayah.text
+            )}
+          </div>
 
-            </div>
+          <div class="ayah-latin">
+            ${escapeHTML(
+              latinText
+            )}
+          </div>
 
-          </article>
+          <div class="ayah-translation">
+            ${escapeHTML(
+              stripHTML(
+                translation
+              )
+            )}
+          </div>
 
+          <div class="ayah-tools">
+
+            <button
+              class="round-btn icon-3d-button"
+              data-ayah-play="${index}"
+              title="Putar"
+            >
+              🔊
+            </button>
+
+            <button
+              class="round-btn icon-3d-button"
+              data-ayah-save="${index}"
+              title="Simpan"
+            >
+              🔖
+            </button>
+
+            <button
+              class="round-btn icon-3d-button"
+              data-ayah-copy="${index}"
+              title="Salin"
+            >
+              ⧉
+            </button>
+
+          </div>
+
+        </article>
         `;
       }
     ).join("");
 
-  $$("[data-play-ayah]")
-    .forEach(btn => {
+  /*
+    PENTING:
+    Semua tombol ▶ memakai data-index,
+    bukan event card.
+  */
 
-      btn.onclick = e => {
+  $$("[data-ayah-play]")
+    .forEach(button => {
 
-        e.stopPropagation();
+      button.onclick =
+        event => {
 
-        playAyah(
-          Number(
-            btn.dataset.playAyah
-          )
-        );
-      };
+          event.preventDefault();
 
-    });
+          event.stopPropagation();
 
-  $$("[data-save-ayah]")
-    .forEach(btn => {
+          const index =
+            Number(
+              button.dataset.ayahPlay
+            );
 
-      btn.onclick = e => {
+          playAyah(
+            index
+          );
 
-        e.stopPropagation();
-
-        saveCurrentAyah(
-          Number(
-            btn.dataset.saveAyah
-          )
-        );
-
-      };
+        };
 
     });
 
-  $$(".ayah").forEach(card => {
+  $$("[data-ayah-save]")
+    .forEach(button => {
 
-    card.onclick = () => {
+      button.onclick =
+        event => {
 
-      playAyah(
-        Number(
-          card.dataset.ayahIndex
-        )
-      );
+          event.stopPropagation();
 
-    };
+          saveCurrentAyah(
+            Number(
+              button.dataset.ayahSave
+            )
+          );
 
-  });
+        };
+
+    });
+
+  $$("[data-ayah-copy]")
+    .forEach(button => {
+
+      button.onclick =
+        event => {
+
+          event.stopPropagation();
+
+          copyAyah(
+            Number(
+              button.dataset.ayahCopy
+            )
+          );
+
+        };
+
+    });
 }
 
 
 /* =========================================================
-   AUDIO
+   PLAY AYAT
    ========================================================= */
-
-function audioURL(
-  globalAyahNumber
-) {
-
-  return (
-    `${AUDIO_BASE}/` +
-    `${globalAyahNumber}.mp3`
-  );
-}
-
 
 async function playAyah(
   index
@@ -585,7 +746,7 @@ async function playAyah(
   if (!state.current) {
 
     toast(
-      "Buka surah terlebih dahulu"
+      "Pilih surah terlebih dahulu"
     );
 
     return;
@@ -601,68 +762,76 @@ async function playAyah(
   state.currentIndex =
     index;
 
-  state.playing = true;
+  state.playing =
+    true;
 
-  highlightAyah(index);
-
-  const url =
-    audioURL(
-      ayah.number
-    );
-
-  console.log(
-    "Playing:",
-    url
+  highlightAyah(
+    index
   );
+
+  /*
+    Stop current audio dahulu.
+    Ini membuat tombol setiap ayat
+    tidak bertabrakan.
+  */
 
   audio.pause();
 
-  audio.currentTime = 0;
+  audio.removeAttribute(
+    "src"
+  );
 
-  audio.src = url;
+  audio.load();
+
+  audio.src =
+    `${AUDIO_BASE}/${ayah.number}.mp3`;
+
+  audio.load();
 
   try {
 
     await audio.play();
 
-    animateAyah(index);
+    setPlayingButton(
+      index,
+      true
+    );
 
   } catch (error) {
 
     console.error(
-      "AUDIO PLAY ERROR:",
+      "PLAY ERROR:",
       error
     );
 
+    state.playing =
+      false;
+
     toast(
-      "Tekan tombol Play untuk mengaktifkan audio"
+      "Tekan ▶ sekali lagi untuk mengaktifkan audio"
     );
   }
 }
 
 
 /* =========================================================
-   AUTO PLAY NEXT
+   AUDIO ENDED
    ========================================================= */
 
 audio.addEventListener(
   "ended",
   () => {
 
-    if (!state.current) {
-      return;
-    }
-
-    const total =
-      state.current
-        .arabic
-        .ayahs
-        .length;
+    setPlayingButton(
+      state.currentIndex,
+      false
+    );
 
     if (
       state.autoNext &&
+      state.current &&
       state.currentIndex <
-        total - 1
+        state.current.arabic.ayahs.length - 1
     ) {
 
       const next =
@@ -670,102 +839,66 @@ audio.addEventListener(
 
       setTimeout(
         () => {
-          playAyah(next);
+
+          playAyah(
+            next
+          );
+
         },
-        250
+        350
       );
 
     } else {
 
-      state.playing = false;
+      state.playing =
+        false;
 
       $$(".ayah")
         .forEach(
-          el =>
-            el.classList.remove(
+          ayah =>
+            ayah.classList.remove(
               "playing"
             )
         );
 
-      toast(
-        "Surah selesai dibaca"
-      );
     }
   }
 );
 
 
 /* =========================================================
-   PLAY WHOLE SURAH
+   PLAY BUTTON STATE
    ========================================================= */
 
-function playWholeSurah() {
+function setPlayingButton(
+  index,
+  playing
+) {
 
-  if (!state.current) {
-
-    toast(
-      "Pilih surah terlebih dahulu"
-    );
-
-    return;
-  }
-
-  /*
-    Ini adalah interaksi pengguna.
-    Setelah audio pertama berhasil,
-    event "ended" akan meneruskan
-    ke ayat berikutnya secara otomatis.
-  */
-
-  state.autoNext = true;
-
-  playAyah(0);
-
-  toast(
-    "Bacaan otomatis dimulai"
-  );
-}
-
-
-/* =========================================================
-   PAUSE
-   ========================================================= */
-
-function pauseAudio() {
-
-  audio.pause();
-
-  state.playing = false;
-
-  toast(
-    "Bacaan dijeda"
-  );
-}
-
-
-/* =========================================================
-   STOP
-   ========================================================= */
-
-function stopAudio() {
-
-  audio.pause();
-
-  audio.currentTime = 0;
-
-  state.playing = false;
-
-  $$(".ayah")
+  $$("[data-ayah-play]")
     .forEach(
-      el =>
-        el.classList.remove(
-          "playing"
-        )
-    );
+      button => {
 
-  toast(
-    "Bacaan dihentikan"
-  );
+        const same =
+          Number(
+            button.dataset.ayahPlay
+          ) === index;
+
+        if (same) {
+
+          button.textContent =
+            playing
+              ? "Ⅱ"
+              : "▶";
+
+          button.classList.toggle(
+            "is-playing",
+            playing
+          );
+        }
+
+      }
+    );
 }
 
 
@@ -779,51 +912,38 @@ function highlightAyah(
 
   $$(".ayah")
     .forEach(
-      el =>
-        el.classList.remove(
+      ayah =>
+        ayah.classList.remove(
           "playing"
         )
     );
 
-  const card =
+  const target =
     $(`#ayah-${index}`);
 
-  if (!card) return;
+  if (!target) return;
 
-  card.classList.add(
+  target.classList.add(
     "playing"
   );
 
-  card.scrollIntoView({
+  target.scrollIntoView({
     behavior: "smooth",
     block: "center"
   });
-}
 
-
-function animateAyah(
-  index
-) {
-
-  const card =
-    $(`#ayah-${index}`);
-
-  if (!card) return;
-
-  card.animate(
+  target.animate(
     [
       {
         transform:
           "scale(.97)",
         opacity: .65
       },
-
       {
         transform:
           "scale(1.025)",
         opacity: 1
       },
-
       {
         transform:
           "scale(1)",
@@ -840,8 +960,32 @@ function animateAyah(
 
 
 /* =========================================================
-   BUTTONS READER
+   WHOLE SURAH
    ========================================================= */
+
+function playWholeSurah() {
+
+  if (!state.current) {
+
+    toast(
+      "Pilih surah terlebih dahulu"
+    );
+
+    return;
+  }
+
+  state.autoNext =
+    true;
+
+  playAyah(
+    0
+  );
+
+  toast(
+    "Bacaan otomatis dimulai"
+  );
+}
+
 
 $("#playSurah")
   ?.addEventListener(
@@ -849,142 +993,132 @@ $("#playSurah")
     playWholeSurah
   );
 
+
 $("#pauseSurah")
   ?.addEventListener(
     "click",
-    pauseAudio
+    () => {
+
+      audio.pause();
+
+      state.playing =
+        false;
+
+      setPlayingButton(
+        state.currentIndex,
+        false
+      );
+
+      toast(
+        "Bacaan dijeda"
+      );
+
+    }
   );
+
 
 $("#stopSurah")
   ?.addEventListener(
     "click",
-    stopAudio
+    () => {
+
+      audio.pause();
+
+      audio.currentTime =
+        0;
+
+      state.playing =
+        false;
+
+      $$(".ayah")
+        .forEach(
+          el =>
+            el.classList.remove(
+              "playing"
+            )
+        );
+
+      setPlayingButton(
+        state.currentIndex,
+        false
+      );
+
+    }
   );
 
 
 /* =========================================================
-   NAVIGATION
+   AYAT PILIHAN
    ========================================================= */
 
-function initNavigation() {
+function initDailyVerse() {
 
-  $$("[data-page]")
-    .forEach(btn => {
+  const playButton =
+    document.querySelector(
+      "[data-demo-audio]"
+    );
 
-      btn.addEventListener(
-        "click",
-        () => {
+  if (!playButton) return;
 
-          showPage(
-            btn.dataset.page
+  /*
+    Jangan hardcode global ayat
+    yang tidak sesuai teks.
+    Kita ambil ayat 94:6 sebagai
+    contoh konsisten.
+  */
+
+  playButton.onclick =
+    async () => {
+
+      try {
+
+        /*
+          Al-Insyirah ayat 6
+        */
+
+        const data =
+          await api(
+            `${QURAN_API}/surah/94/quran-uthmani`
           );
 
-        }
-      );
+        const ayah =
+          data.ayahs[5];
 
-    });
+        audio.pause();
 
-  $("#readerBack")
-    ?.addEventListener(
-      "click",
-      () => showPage("quran")
-    );
+        audio.src =
+          `${AUDIO_BASE}/${ayah.number}.mp3`;
 
-  $("#continueBtn")
-    ?.addEventListener(
-      "click",
-      () => {
+        audio.load();
 
-        const last =
-          Number(
-            localStorage.getItem(
-              "nurq_last_surah"
-            ) || 1
-          );
+        await audio.play();
 
-        openSurah(last);
-      }
-    );
-}
+        playButton.textContent =
+          "Ⅱ";
 
-
-function showPage(page) {
-
-  $$(".page")
-    .forEach(
-      p =>
-        p.classList.remove(
-          "active"
-        )
-    );
-
-  const target =
-    $(`#${page}Page`);
-
-  if (target) {
-
-    target.classList.add(
-      "active"
-    );
-  }
-
-  $$(".nav-item")
-    .forEach(btn => {
-
-      btn.classList.toggle(
-        "active",
-        btn.dataset.page === page
-      );
-
-    });
-
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth"
-  });
-}
-
-
-/* =========================================================
-   SEARCH
-   ========================================================= */
-
-function initSearch() {
-
-  $("#surahSearch")
-    ?.addEventListener(
-      "input",
-      e => {
-
-        renderSurahs(
-          e.target.value
+        toast(
+          "Ayat pilihan sedang dibaca"
         );
 
-      }
-    );
-
-  $("#searchSurahBtn")
-    ?.addEventListener(
-      "click",
-      () => {
-
-        const box =
-          $("#surahSearchBox");
-
-        box.scrollIntoView({
-          behavior: "smooth"
-        });
-
-        setTimeout(
+        audio.onended =
           () => {
-            $("#surahSearch")
-              ?.focus();
-          },
-          300
+
+            playButton.textContent =
+              "▶";
+
+          };
+
+      } catch (error) {
+
+        console.error(
+          error
         );
 
+        toast(
+          "Audio ayat pilihan gagal"
+        );
       }
-    );
+    };
 }
 
 
@@ -996,7 +1130,8 @@ function saveCurrentAyah(
   index
 ) {
 
-  if (!state.current) return;
+  if (!state.current)
+    return;
 
   const ayah =
     state.current
@@ -1020,7 +1155,7 @@ function saveCurrentAyah(
       );
 
     toast(
-      "Ayat dihapus dari tersimpan"
+      "Ayat dihapus"
     );
 
   } else {
@@ -1042,7 +1177,7 @@ function saveCurrentAyah(
     });
 
     toast(
-      "Ayat berhasil disimpan 🔖"
+      "Ayat disimpan 🔖"
     );
   }
 
@@ -1052,101 +1187,614 @@ function saveCurrentAyah(
       state.bookmarks
     )
   );
-
-  renderBookmarks();
 }
 
 
-function renderBookmarks() {
+async function copyAyah(
+  index
+) {
 
-  const container =
-    $("#bookmarkList");
+  const ayah =
+    state.current
+      .arabic
+      .ayahs[index];
 
-  if (!container) return;
+  try {
 
-  if (!state.bookmarks.length) {
+    await navigator.clipboard.writeText(
+      ayah.text
+    );
 
-    container.innerHTML = `
-      <div class="bookmark-empty">
+    toast(
+      "Ayat berhasil disalin"
+    );
 
-        <div
-          style="
-            font-size:45px;
-            margin-bottom:10px;
-          "
-        >
-          🔖
-        </div>
+  } catch {
 
-        <p>
-          Belum ada ayat tersimpan.
-        </p>
+    toast(
+      "Tidak bisa menyalin"
+    );
+  }
+}
 
-      </div>
-    `;
 
+/* =========================================================
+   TIMEZONE + PRAYER
+   ========================================================= */
+
+async function loadPrayerTimes() {
+
+  if (!state.timezone) {
     return;
   }
 
-  container.innerHTML =
-    state.bookmarks.map(
-      item => `
+  if (!navigator.geolocation) {
 
-      <article class="ayah">
+    return prayerRequest(
+      -6.2,
+      106.816666
+    );
+  }
 
-        <div class="ayah-head">
+  navigator.geolocation
+    .getCurrentPosition(
+      position => {
 
-          <span class="ayah-number">
-            ${escapeHTML(item.surah)}
-            •
-            ${item.ayah}
+        prayerRequest(
+          position.coords.latitude,
+          position.coords.longitude
+        );
+
+      },
+
+      () => {
+
+        prayerRequest(
+          -6.2,
+          106.816666
+        );
+
+      },
+
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000
+      }
+    );
+}
+
+
+async function prayerRequest(
+  lat,
+  lon
+) {
+
+  try {
+
+    const date =
+      getLocalDateString();
+
+    const url =
+      `https://api.aladhan.com/v1/timings/${date}` +
+      `?latitude=${lat}` +
+      `&longitude=${lon}` +
+      `&method=20`;
+
+    const response =
+      await fetch(url);
+
+    const json =
+      await response.json();
+
+    if (!json.data) {
+      throw new Error(
+        "Prayer API failed"
+      );
+    }
+
+    window.prayerData =
+      json.data.timings;
+
+    renderPrayer(
+      json.data.timings
+    );
+
+    updateNextPrayer();
+
+  } catch (error) {
+
+    console.error(
+      "PRAYER ERROR",
+      error
+    );
+
+    toast(
+      "Gagal mengambil waktu sholat"
+    );
+  }
+}
+
+
+function getLocalDateString() {
+
+  /*
+    API date mengikuti tanggal lokal
+    yang dipilih pengguna.
+  */
+
+  const now =
+    new Date();
+
+  const parts =
+    new Intl.DateTimeFormat(
+      "en-GB",
+      {
+        timeZone:
+          getIANATimezone(),
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }
+    ).formatToParts(now);
+
+  const day =
+    parts.find(
+      p => p.type === "day"
+    ).value;
+
+  const month =
+    parts.find(
+      p => p.type === "month"
+    ).value;
+
+  const year =
+    parts.find(
+      p => p.type === "year"
+    ).value;
+
+  return `${day}-${month}-${year}`;
+}
+
+
+function getIANATimezone() {
+
+  if (state.timezone === "WITA")
+    return "Asia/Makassar";
+
+  if (state.timezone === "WIT")
+    return "Asia/Jayapura";
+
+  return "Asia/Jakarta";
+}
+
+
+function renderPrayer(
+  timings
+) {
+
+  const names = {
+    Fajr: "Subuh",
+    Dhuhr: "Dzuhur",
+    Asr: "Ashar",
+    Maghrib: "Maghrib",
+    Isha: "Isya"
+  };
+
+  const list =
+    $("#prayerList");
+
+  if (!list) return;
+
+  list.innerHTML =
+    Object.entries(names)
+      .map(
+        ([key,name]) => `
+
+        <div
+          class="prayer-row"
+          data-prayer="${key}"
+        >
+
+          <span class="symbol icon-3d">
+            ☪
           </span>
 
-          <button
-            class="ayah-play"
-            data-bookmark-audio="${item.globalNumber}"
-          >
-            ▶
-          </button>
+          <span class="name">
+            ${name}
+          </span>
+
+          <span class="time">
+            ${timings[key]}
+          </span>
 
         </div>
+      `
+      )
+      .join("");
+}
 
-        <div class="ayah-arabic">
-          ${escapeHTML(item.text)}
-        </div>
 
-      </article>
-    `
-    ).join("");
+function getNowForTimezone() {
 
-  $$("[data-bookmark-audio]")
-    .forEach(btn => {
+  return new Date(
+    new Date().toLocaleString(
+      "en-US",
+      {
+        timeZone:
+          getIANATimezone()
+      }
+    )
+  );
+}
 
-      btn.onclick = async () => {
 
-        audio.pause();
+function getPrayerList() {
 
-        audio.src =
-          audioURL(
-            Number(
-              btn.dataset.bookmarkAudio
-            )
-          );
+  if (!window.prayerData)
+    return [];
 
-        try {
+  const map = {
+    Fajr: "Subuh",
+    Dhuhr: "Dzuhur",
+    Asr: "Ashar",
+    Maghrib: "Maghrib",
+    Isha: "Isya"
+  };
 
-          await audio.play();
+  return Object.entries(map)
+    .map(
+      ([key,name]) => {
 
-        } catch {
+        const [h,m] =
+          window.prayerData[key]
+            .split(":")
+            .map(Number);
 
-          toast(
-            "Tekan tombol lagi untuk memutar"
-          );
-        }
+        const date =
+          getNowForTimezone();
 
-      };
+        date.setHours(
+          h,
+          m,
+          0,
+          0
+        );
+
+        return {
+          key,
+          name,
+          time:
+            window.prayerData[key],
+          date
+        };
+      }
+    );
+}
+
+
+function updateNextPrayer() {
+
+  const prayers =
+    getPrayerList();
+
+  if (!prayers.length)
+    return;
+
+  const now =
+    getNowForTimezone();
+
+  let next =
+    prayers.find(
+      p =>
+        p.date > now
+    );
+
+  if (!next) {
+
+    next =
+      prayers[0];
+
+    next.date.setDate(
+      next.date.getDate() + 1
+    );
+  }
+
+  if ($("#nextPrayerName")) {
+
+    $("#nextPrayerName")
+      .textContent =
+      next.name;
+  }
+
+  if ($("#nextPrayerTime")) {
+
+    $("#nextPrayerTime")
+      .textContent =
+      next.time;
+  }
+
+  $$(".prayer-row")
+    .forEach(row => {
+
+      row.classList.toggle(
+        "active",
+        row.dataset.prayer ===
+          next.key
+      );
 
     });
+
+  updateCountdown(
+    next.date
+  );
+}
+
+
+function updateCountdown(
+  target
+) {
+
+  const now =
+    getNowForTimezone();
+
+  const diff =
+    target - now;
+
+  if (diff <= 0)
+    return;
+
+  const total =
+    Math.floor(
+      diff / 1000
+    );
+
+  const h =
+    Math.floor(
+      total / 3600
+    );
+
+  const m =
+    Math.floor(
+      (total % 3600) / 60
+    );
+
+  const s =
+    total % 60;
+
+  if ($("#countdown")) {
+
+    $("#countdown")
+      .textContent =
+      `${String(h).padStart(2,"0")}:` +
+      `${String(m).padStart(2,"0")}:` +
+      `${String(s).padStart(2,"0")}`;
+  }
+}
+
+
+/* =========================================================
+   ADHAN
+   ========================================================= */
+
+function startPrayerClock() {
+
+  setInterval(
+    () => {
+
+      updateNextPrayer();
+
+      checkAdhan();
+
+    },
+    1000
+  );
+}
+
+
+function checkAdhan() {
+
+  if (!state.adhanEnabled)
+    return;
+
+  const prayers =
+    getPrayerList();
+
+  const now =
+    getNowForTimezone();
+
+  const hour =
+    now.getHours();
+
+  const minute =
+    now.getMinutes();
+
+  const second =
+    now.getSeconds();
+
+  /*
+    Hanya trigger di detik 0-4
+    supaya tidak berulang setiap detik.
+  */
+
+  if (second > 4)
+    return;
+
+  const current =
+    prayers.find(
+      prayer => {
+
+        const h =
+          prayer.date
+            .getHours();
+
+        const m =
+          prayer.date
+            .getMinutes();
+
+        return (
+          h === hour &&
+          m === minute
+        );
+      }
+    );
+
+  if (!current)
+    return;
+
+  const key =
+    `${now.toDateString()}-` +
+    `${current.key}-` +
+    state.timezone;
+
+  if (
+    state.lastAdhanKey === key
+  )
+    return;
+
+  state.lastAdhanKey =
+    key;
+
+  playAdhan(
+    current.name
+  );
+}
+
+
+async function playAdhan(
+  prayerName
+) {
+
+  try {
+
+    audio.pause();
+
+    audio.src =
+      ADHAN_URL;
+
+    audio.load();
+
+    await audio.play();
+
+    toast(
+      `🔊 Adzan ${prayerName}`
+    );
+
+    showAdhanOverlay(
+      prayerName
+    );
+
+  } catch (error) {
+
+    console.error(
+      "ADHAN ERROR",
+      error
+    );
+
+    showAdhanOverlay(
+      prayerName,
+      true
+    );
+
+    toast(
+      `Waktu ${prayerName} telah masuk`
+    );
+  }
+}
+
+
+function showAdhanOverlay(
+  name,
+  blocked = false
+) {
+
+  const old =
+    document.getElementById(
+      "adhanOverlay"
+    );
+
+  old?.remove();
+
+  const overlay =
+    document.createElement(
+      "div"
+    );
+
+  overlay.id =
+    "adhanOverlay";
+
+  overlay.className =
+    "adhan-overlay";
+
+  overlay.innerHTML = `
+
+    <div class="adhan-popup">
+
+      <div class="adhan-orb">
+        ☪
+      </div>
+
+      <span>
+        WAKTU SHOLAT
+      </span>
+
+      <h2>
+        ${name}
+      </h2>
+
+      <p>
+        ${blocked
+          ? "Tekan tombol di bawah untuk memutar Adzan."
+          : "Saatnya menunaikan sholat."}
+      </p>
+
+      <button
+        id="playAdhanNow"
+        class="adhan-main-button"
+      >
+        🔊
+        ${blocked
+          ? "Putar Adzan"
+          : "Buka Sholat"}
+      </button>
+
+      <button
+        id="closeAdhan"
+        class="adhan-close"
+      >
+        Matikan
+      </button>
+
+    </div>
+  `;
+
+  document.body.appendChild(
+    overlay
+  );
+
+  $("#playAdhanNow")
+    .onclick =
+    () => {
+
+      audio.src =
+        ADHAN_URL;
+
+      audio.play();
+
+      toast(
+        `Adzan ${name}`
+      );
+    };
+
+  $("#closeAdhan")
+    .onclick =
+    () => {
+
+      audio.pause();
+
+      overlay.remove();
+
+    };
 }
 
 
@@ -1162,35 +1810,10 @@ function initSettings() {
       () => {
 
         $("#settingsModal")
-          ?.classList.add("show");
+          ?.classList.add(
+            "show"
+          );
 
-      }
-    );
-
-  $("#animationToggle")
-    ?.addEventListener(
-      "change",
-      e => {
-
-        localStorage.setItem(
-          "nurq_animation",
-          e.target.checked
-        );
-      }
-    );
-
-  $("#autoNextToggle")
-    ?.addEventListener(
-      "change",
-      e => {
-
-        state.autoNext =
-          e.target.checked;
-
-        localStorage.setItem(
-          "nurq_auto_next",
-          e.target.checked
-        );
       }
     );
 
@@ -1223,6 +1846,54 @@ function initSettings() {
         applyFont();
       }
     );
+
+  /*
+    Tambahkan timezone selector
+    ke settings jika element tersedia.
+  */
+
+  const adhanToggle =
+    $("#adhanToggle");
+
+  if (adhanToggle) {
+
+    state.adhanEnabled =
+      localStorage.getItem(
+        "nurq_adhan"
+      ) === "true";
+
+    adhanToggle.checked =
+      state.adhanEnabled;
+
+    adhanToggle.onchange =
+      event => {
+
+        state.adhanEnabled =
+          event.target.checked;
+
+        localStorage.setItem(
+          "nurq_adhan",
+          state.adhanEnabled
+        );
+
+        if (
+          state.adhanEnabled
+        ) {
+
+          requestNotificationPermission();
+
+          toast(
+            "Alarm Adzan aktif"
+          );
+
+        } else {
+
+          toast(
+            "Alarm Adzan dimatikan"
+          );
+        }
+      };
+  }
 }
 
 
@@ -1250,388 +1921,266 @@ function applyFont() {
 
 
 /* =========================================================
+   NAV
+   ========================================================= */
+
+function initNavigation() {
+
+  $$("[data-page]")
+    .forEach(
+      button => {
+
+        button.onclick =
+          () => {
+
+            showPage(
+              button.dataset.page
+            );
+
+          };
+      }
+    );
+
+  $("#readerBack")
+    ?.addEventListener(
+      "click",
+      () =>
+        showPage("quran")
+    );
+
+  $("#continueBtn")
+    ?.addEventListener(
+      "click",
+      () => {
+
+        openSurah(
+          Number(
+            localStorage.getItem(
+              "nurq_last_surah"
+            ) || 1
+          )
+        );
+
+      }
+    );
+}
+
+
+function showPage(
+  page
+) {
+
+  $$(".page")
+    .forEach(
+      p =>
+        p.classList.remove(
+          "active"
+        )
+    );
+
+  const target =
+    $(`#${page}Page`);
+
+  target?.classList.add(
+    "active"
+  );
+
+  $$(".nav-item")
+    .forEach(
+      item => {
+
+        item.classList.toggle(
+          "active",
+          item.dataset.page ===
+            page
+        );
+
+      }
+    );
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
+}
+
+
+/* =========================================================
+   SEARCH
+   ========================================================= */
+
+function initSearch() {
+
+  $("#surahSearch")
+    ?.addEventListener(
+      "input",
+      e =>
+        renderSurahs(
+          e.target.value
+        )
+    );
+}
+
+
+/* =========================================================
+   AYAT BUTTONS
+   ========================================================= */
+
+function initAyahButtons() {
+
+  document.addEventListener(
+    "click",
+    event => {
+
+      const button =
+        event.target.closest(
+          "[data-ayah-play]"
+        );
+
+      if (!button)
+        return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      playAyah(
+        Number(
+          button.dataset.ayahPlay
+        )
+      );
+
+    }
+  );
+}
+
+
+/* =========================================================
    MODAL
    ========================================================= */
 
 function initModals() {
 
   $$("[data-close]")
-    .forEach(btn => {
+    .forEach(
+      button => {
 
-      btn.onclick = () => {
+        button.onclick =
+          () => {
 
-        btn.closest(".modal")
-          ?.classList.remove(
-            "show"
-          );
-      };
+            button
+              .closest(".modal")
+              ?.classList.remove(
+                "show"
+              );
 
-    });
+          };
+
+      }
+    );
 
   $$(".modal")
-    .forEach(modal => {
+    .forEach(
+      modal => {
 
-      modal.addEventListener(
-        "click",
-        e => {
+        modal.addEventListener(
+          "click",
+          event => {
 
-          if (
-            e.target === modal
-          ) {
+            if (
+              event.target === modal
+            ) {
 
-            modal.classList.remove(
-              "show"
-            );
+              modal.classList.remove(
+                "show"
+              );
+            }
+
           }
+        );
 
-        }
-      );
-
-    });
+      }
+    );
 }
 
 
 /* =========================================================
-   PRAYER
+   NOTIFICATION / SERVICE WORKER
    ========================================================= */
 
-async function initPrayer() {
-
-  $("#refreshPrayer")
-    ?.addEventListener(
-      "click",
-      loadPrayerTimes
-    );
-
-  $("#locationBtn")
-    ?.addEventListener(
-      "click",
-      requestLocation
-    );
-}
-
-
-async function loadPrayerTimes() {
-
-  if (!navigator.geolocation) {
-
-    await prayerFromCoordinates(
-      -6.2,
-      106.816666,
-      "Jakarta, Indonesia"
-    );
-
-    return;
-  }
-
-  navigator.geolocation
-    .getCurrentPosition(
-      async position => {
-
-        await prayerFromCoordinates(
-          position.coords.latitude,
-          position.coords.longitude,
-          "Lokasi perangkat"
-        );
-
-      },
-
-      async () => {
-
-        await prayerFromCoordinates(
-          -6.2,
-          106.816666,
-          "Jakarta, Indonesia"
-        );
-
-      },
-
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000
-      }
-    );
-}
-
-
-function requestLocation() {
-
-  if (!navigator.geolocation) {
-
-    toast(
-      "GPS tidak tersedia"
-    );
-
-    return;
-  }
-
-  navigator.geolocation
-    .getCurrentPosition(
-      async position => {
-
-        await prayerFromCoordinates(
-          position.coords.latitude,
-          position.coords.longitude,
-          "Lokasi perangkat"
-        );
-
-        toast(
-          "Lokasi diperbarui"
-        );
-
-      },
-
-      () => {
-
-        toast(
-          "Izin lokasi ditolak"
-        );
-
-      }
-    );
-}
-
-
-async function prayerFromCoordinates(
-  lat,
-  lon,
-  locationName
-) {
-
-  try {
-
-    const now =
-      new Date();
-
-    const dd =
-      String(
-        now.getDate()
-      ).padStart(2,"0");
-
-    const mm =
-      String(
-        now.getMonth() + 1
-      ).padStart(2,"0");
-
-    const yyyy =
-      now.getFullYear();
-
-    const url =
-      `https://api.aladhan.com/v1/timings/${dd}-${mm}-${yyyy}` +
-      `?latitude=${lat}` +
-      `&longitude=${lon}` +
-      `&method=20`;
-
-    const response =
-      await fetch(url);
-
-    const json =
-      await response.json();
-
-    if (
-      !json.data ||
-      !json.data.timings
-    ) {
-
-      throw new Error(
-        "Prayer API error"
-      );
-    }
-
-    window.prayerData =
-      json.data.timings;
-
-    $("#locationText")
-      && (
-        $("#locationText")
-          .textContent =
-          locationName
-      );
-
-    renderPrayer(
-      json.data.timings
-    );
-
-    updateNextPrayer();
-
-  } catch (error) {
-
-    console.error(
-      error
-    );
-
-    toast(
-      "Gagal memuat jadwal sholat"
-    );
-  }
-}
-
-
-function renderPrayer(
-  timings
-) {
-
-  const map = {
-    Fajr: "Subuh",
-    Dhuhr: "Dzuhur",
-    Asr: "Ashar",
-    Maghrib: "Maghrib",
-    Isha: "Isya"
-  };
-
-  const list =
-    $("#prayerList");
-
-  if (!list) return;
-
-  list.innerHTML =
-    Object.entries(map)
-      .map(
-        ([key,name]) => `
-
-        <div
-          class="prayer-row"
-          data-prayer="${key}"
-        >
-
-          <span class="symbol">
-            ☪
-          </span>
-
-          <span class="name">
-            ${name}
-          </span>
-
-          <span class="time">
-            ${timings[key]}
-          </span>
-
-        </div>
-
-      `
-      )
-      .join("");
-}
-
-
-function updateNextPrayer() {
-
-  const timings =
-    window.prayerData;
-
-  if (!timings) return;
-
-  const prayers = [
-    ["Fajr","Subuh"],
-    ["Dhuhr","Dzuhur"],
-    ["Asr","Ashar"],
-    ["Maghrib","Maghrib"],
-    ["Isha","Isya"]
-  ];
-
-  const now =
-    new Date();
-
-  const current =
-    now.getHours() * 60 +
-    now.getMinutes();
-
-  let next = null;
-
-  for (
-    const [key,name]
-    of prayers
+async function requestNotificationPermission() {
+
+  if (
+    "Notification" in window &&
+    Notification.permission ===
+      "default"
   ) {
 
-    const [h,m] =
-      timings[key]
-        .split(":")
-        .map(Number);
+    try {
 
-    const value =
-      h * 60 + m;
+      await Notification.requestPermission();
 
-    if (value > current) {
-
-      next = {
-        key,
-        name,
-        time: timings[key],
-        value
-      };
-
-      break;
-    }
+    } catch {}
   }
+}
 
-  if (!next) {
 
-    next = {
-      key: "Fajr",
-      name: "Subuh",
-      time: timings.Fajr
-    };
-  }
+async function registerServiceWorker() {
 
-  if ($("#nextPrayerName")) {
+  if (
+    "serviceWorker" in navigator
+  ) {
 
-    $("#nextPrayerName")
-      .textContent =
-      next.name;
-  }
+    try {
 
-  if ($("#nextPrayerTime")) {
+      await navigator.serviceWorker
+        .register(
+          "./sw.js"
+        );
 
-    $("#nextPrayerTime")
-      .textContent =
-      next.time;
-  }
-
-  $$(".prayer-row")
-    .forEach(row => {
-
-      row.classList.toggle(
-        "active",
-        row.dataset.prayer ===
-          next.key
+      console.log(
+        "Service Worker aktif"
       );
 
-    });
+    } catch (error) {
+
+      console.warn(
+        "SW gagal:",
+        error
+      );
+    }
+  }
 }
 
 
 /* =========================================================
-   TOAST
+   UTILITIES
    ========================================================= */
-
-let toastTimer;
 
 function toast(
   message
 ) {
 
-  const element =
+  const el =
     $("#toast");
 
-  if (!element) return;
+  if (!el) return;
 
-  element.textContent =
+  el.textContent =
     message;
 
-  element.classList.add(
+  el.classList.add(
     "show"
   );
 
   clearTimeout(
-    toastTimer
+    window.__toast
   );
 
-  toastTimer =
+  window.__toast =
     setTimeout(
       () => {
 
-        element.classList.remove(
+        el.classList.remove(
           "show"
         );
 
@@ -1641,24 +2190,21 @@ function toast(
 }
 
 
-/* =========================================================
-   UTILITIES
-   ========================================================= */
-
 function stripHTML(
   html
 ) {
 
-  const temp =
+  const div =
     document.createElement(
       "div"
     );
 
-  temp.innerHTML =
+  div.innerHTML =
     html || "";
 
-  return temp.textContent ||
-    "";
+  return (
+    div.textContent || ""
+  );
 }
 
 
