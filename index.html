@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7fb">
+  <title>NurQ — Al-Qur'an</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<div id="app">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div>
+      <span class="eyebrow">ASSALAMUALAIKUM</span>
+      <h1>NurQ <span>﷽</span></h1>
+    </div>
+
+    <button class="icon-btn" id="settingsBtn" aria-label="Pengaturan">
+      ⚙️
+    </button>
+  </header>
+
+  <!-- HOME -->
+  <main id="homePage" class="page active">
+
+    <section class="hero-card">
+      <div class="hero-glow"></div>
+
+      <div class="hero-top">
+        <div>
+          <span class="small-label">LANJUTKAN MEMBACA</span>
+          <h2 id="continueTitle">Al-Fatihah</h2>
+          <p id="continueMeta">Surah 1 • 7 Ayat</p>
+        </div>
+
+        <div class="quran-symbol">۞</div>
+      </div>
+
+      <button class="continue-btn" id="continueBtn">
+        <span>▶</span>
+        Lanjutkan
+      </button>
+    </section>
+
+    <!-- NEXT PRAYER -->
+    <section class="section-head">
+      <div>
+        <span class="section-kicker">WAKTU SHOLAT</span>
+        <h2>Sholat berikutnya</h2>
+      </div>
+
+      <button class="mini-btn" id="refreshPrayer">↻</button>
+    </section>
+
+    <section class="next-prayer glass-card">
+      <div class="prayer-icon">☪</div>
+
+      <div class="prayer-info">
+        <span id="nextPrayerName">Memuat...</span>
+        <strong id="nextPrayerTime">--:--</strong>
+      </div>
+
+      <div class="countdown" id="countdown">
+        --:--
+      </div>
+    </section>
+
+    <!-- QUICK ACTION -->
+    <section class="quick-grid">
+
+      <button class="quick-card" data-page="quran">
+        <div class="quick-icon green">📖</div>
+        <strong>Al-Qur'an</strong>
+        <span>Baca & dengarkan</span>
+      </button>
+
+      <button class="quick-card" data-page="tajwid">
+        <div class="quick-icon blue">✨</div>
+        <strong>Belajar Tajwid</strong>
+        <span>Pelajari makhraj</span>
+      </button>
+
+      <button class="quick-card" data-page="prayer">
+        <div class="quick-icon purple">🕌</div>
+        <strong>Sholat</strong>
+        <span>Jadwal & alarm</span>
+      </button>
+
+      <button class="quick-card" data-page="bookmarks">
+        <div class="quick-icon orange">🔖</div>
+        <strong>Tersimpan</strong>
+        <span>Ayat favorit</span>
+      </button>
+
+    </section>
+
+    <!-- DAILY -->
+    <section class="section-head">
+      <div>
+        <span class="section-kicker">HARI INI</span>
+        <h2>Ayat pilihan</h2>
+      </div>
+    </section>
+
+    <section class="verse-card glass-card" id="dailyVerse">
+      <div class="verse-number">۞ 1</div>
+
+      <div class="arabic-preview">
+        إِنَّ مَعَ الْعُسْرِ يُسْرًا
+      </div>
+
+      <p class="latin-preview">
+        Inna ma'al-'usri yusrā
+      </p>
+
+      <div class="verse-actions">
+        <button class="round-btn" data-demo-audio>▶</button>
+        <button class="round-btn" data-copy>⧉</button>
+        <button class="round-btn" data-bookmark>🔖</button>
+      </div>
+    </section>
+
+  </main>
+
+
+  <!-- QURAN PAGE -->
+  <main id="quranPage" class="page">
+
+    <div class="page-title">
+      <div>
+        <span class="section-kicker">AL-QUR'AN</span>
+        <h2>Daftar Surah</h2>
+      </div>
+
+      <button class="icon-btn" id="searchSurahBtn">⌕</button>
+    </div>
+
+    <div class="search-box" id="surahSearchBox">
+      <span>⌕</span>
+      <input id="surahSearch" placeholder="Cari surah...">
+    </div>
+
+    <div class="surah-list" id="surahList"></div>
+
+  </main>
+
+
+  <!-- READER PAGE -->
+  <main id="readerPage" class="page">
+
+    <div class="reader-top">
+      <button class="back-btn" id="readerBack">‹</button>
+
+      <div>
+        <span class="section-kicker">SURAH</span>
+        <h2 id="readerTitle">Al-Fatihah</h2>
+      </div>
+
+      <button class="icon-btn" id="readerSettings">Aa</button>
+    </div>
+
+    <section class="surah-cover">
+      <span>سُورَةُ</span>
+      <h1 id="readerArabicName">الفاتحة</h1>
+      <p id="readerTranslation">Pembukaan</p>
+      <small id="readerInfo">Makkiyah • 7 ayat</small>
+    </section>
+
+    <div class="reader-controls">
+      <button id="playSurah">▶ Putar</button>
+      <button id="pauseSurah">Ⅱ Jeda</button>
+      <button id="stopSurah">■ Stop</button>
+    </div>
+
+    <div id="ayahList" class="ayah-list"></div>
+
+  </main>
+
+
+  <!-- TAJWID -->
+  <main id="tajwidPage" class="page">
+
+    <div class="page-title">
+      <div>
+        <span class="section-kicker">PEMBELAJARAN</span>
+        <h2>Tajwid</h2>
+      </div>
+    </div>
+
+    <section class="learning-hero">
+      <div class="learning-orb">ت</div>
+      <h2>Belajar membaca dengan benar</h2>
+      <p>
+        Pelajari hukum bacaan, makhraj, mad, ghunnah,
+        qalqalah, waqaf, dan ibtida secara bertahap.
+      </p>
+    </section>
+
+    <div class="lesson-grid">
+
+      <article class="lesson-card" data-lesson="nun">
+        <span class="lesson-symbol">ن</span>
+        <h3>Nun Sukun</h3>
+        <p>Izhar, idgham, iqlab & ikhfa.</p>
+      </article>
+
+      <article class="lesson-card" data-lesson="mim">
+        <span class="lesson-symbol">م</span>
+        <h3>Mim Sukun</h3>
+        <p>Ikhfa syafawi, idgham & izhar.</p>
+      </article>
+
+      <article class="lesson-card" data-lesson="mad">
+        <span class="lesson-symbol">ٓ</span>
+        <h3>Mad</h3>
+        <p>Panjang-pendek bacaan.</p>
+      </article>
+
+      <article class="lesson-card" data-lesson="ghunnah">
+        <span class="lesson-symbol">نّ</span>
+        <h3>Ghunnah</h3>
+        <p>Dengung pada nun & mim.</p>
+      </article>
+
+      <article class="lesson-card" data-lesson="qalqalah">
+        <span class="lesson-symbol">ق</span>
+        <h3>Qalqalah</h3>
+        <p>Pantulan huruf tertentu.</p>
+      </article>
+
+      <article class="lesson-card" data-lesson="waqaf">
+        <span class="lesson-symbol">۝</span>
+        <h3>Waqaf</h3>
+        <p>Tanda berhenti dalam mushaf.</p>
+      </article>
+
+    </div>
+
+  </main>
+
+
+  <!-- PRAYER PAGE -->
+  <main id="prayerPage" class="page">
+
+    <div class="page-title">
+      <div>
+        <span class="section-kicker">IBADAH</span>
+        <h2>Waktu Sholat</h2>
+      </div>
+
+      <button class="icon-btn" id="locationBtn">⌖</button>
+    </div>
+
+    <section class="location-card glass-card">
+      <span>📍 Lokasi</span>
+      <strong id="locationText">Mendeteksi lokasi...</strong>
+    </section>
+
+    <section class="prayer-list" id="prayerList"></section>
+
+    <section class="alarm-card">
+      <div>
+        <span class="section-kicker">PENGINGAT</span>
+        <h3>Alarm Adzan</h3>
+        <p>Aktifkan agar pengingat berbunyi saat waktu sholat.</p>
+      </div>
+
+      <label class="switch">
+        <input type="checkbox" id="adhanToggle">
+        <span></span>
+      </label>
+    </section>
+
+    <button class="adhan-test" id="testAdhan">
+      🔊 Tes suara Adzan
+    </button>
+
+  </main>
+
+
+  <!-- BOOKMARKS -->
+  <main id="bookmarksPage" class="page">
+
+    <div class="page-title">
+      <div>
+        <span class="section-kicker">KOLEKSI</span>
+        <h2>Ayat Tersimpan</h2>
+      </div>
+    </div>
+
+    <div id="bookmarkList" class="bookmark-list"></div>
+
+  </main>
+
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+
+    <button class="nav-item active" data-page="home">
+      <span>⌂</span>
+      <small>Beranda</small>
+    </button>
+
+    <button class="nav-item" data-page="quran">
+      <span>▤</span>
+      <small>Qur'an</small>
+    </button>
+
+    <button class="nav-item center-nav" data-page="tajwid">
+      <span>﷽</span>
+      <small>Belajar</small>
+    </button>
+
+    <button class="nav-item" data-page="prayer">
+      <span>☪</span>
+      <small>Sholat</small>
+    </button>
+
+    <button class="nav-item" data-page="bookmarks">
+      <span>🔖</span>
+      <small>Simpan</small>
+    </button>
+
+  </nav>
+
+</div>
+
+
+<!-- LESSON MODAL -->
+<div class="modal" id="lessonModal">
+  <div class="modal-sheet">
+
+    <button class="modal-close" data-close>×</button>
+
+    <div id="lessonContent"></div>
+
+  </div>
+</div>
+
+
+<!-- SETTINGS MODAL -->
+<div class="modal" id="settingsModal">
+  <div class="modal-sheet">
+
+    <button class="modal-close" data-close>×</button>
+
+    <span class="section-kicker">PENGATURAN</span>
+    <h2>Preferensi</h2>
+
+    <div class="setting-row">
+      <div>
+        <strong>Animasi bacaan</strong>
+        <span>Efek saat ayat dimainkan</span>
+      </div>
+
+      <label class="switch">
+        <input type="checkbox" id="animationToggle" checked>
+        <span></span>
+      </label>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <strong>Auto lanjut ayat</strong>
+        <span>Putar ayat berikutnya otomatis</span>
+      </div>
+
+      <label class="switch">
+        <input type="checkbox" id="autoNextToggle" checked>
+        <span></span>
+      </label>
+    </div>
+
+    <div class="font-size-row">
+      <strong>Ukuran Arab</strong>
+
+      <div>
+        <button id="fontMinus">−</button>
+        <span id="fontValue">30</span>
+        <button id="fontPlus">+</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<div id="toast"></div>
+
+<audio id="audioPlayer" preload="none"></audio>
+
+<script src="app.js"></script>
+
+</body>
+</html>
