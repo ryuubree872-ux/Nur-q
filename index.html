@@ -1,1 +1,261 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>AudioForge — Cover Editor</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
 
+  <div class="app-shell">
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M9 18V5.8L20 3v12.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M9 18c0 1.66-1.57 3-3.5 3S2 19.66 2 18s1.57-3 3.5-3S9 16.34 9 18Zm11-2.8c0 1.66-1.57 3-3.5 3s-3.5-1.34-3.5-3 1.57-3 3.5-3 3.5 1.34 3.5 3Z" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+        </div>
+        <div>
+          <h1>AudioForge</h1>
+          <span>Cover Editor</span>
+        </div>
+      </div>
+
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        Local
+      </div>
+    </header>
+
+    <main>
+
+      <section class="hero">
+        <div class="hero-badge">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          AUDIO METADATA STUDIO
+        </div>
+        <h2>Ubah cover.<br><span>Jadikan milikmu.</span></h2>
+        <p>Edit cover, judul, artis, album, dan nama file audio langsung dari perangkatmu.</p>
+      </section>
+
+      <section class="upload-card" id="dropZone">
+        <input type="file" id="audioInput" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac" hidden />
+
+        <div class="upload-icon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 14v4.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </div>
+
+        <h3>Masukkan audio</h3>
+        <p>MP3, M4A, WAV, OGG, atau FLAC</p>
+
+        <button class="primary-btn" id="chooseAudioBtn">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          Pilih Audio
+        </button>
+
+        <div class="drop-hint">atau tarik file ke area ini</div>
+      </section>
+
+      <section class="editor hidden" id="editor">
+
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">NOW EDITING</span>
+            <h3>Detail audio</h3>
+          </div>
+          <button class="reset-btn" id="resetBtn">Ganti audio</button>
+        </div>
+
+        <div class="audio-preview-card">
+
+          <div class="cover-area">
+            <div class="cover-art" id="coverArt">
+              <div class="cover-placeholder" id="coverPlaceholder">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M9 18V5.8L20 3v12.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M9 18c0 1.66-1.57 3-3.5 3S2 19.66 2 18s1.57-3 3.5-3S9 16.34 9 18Zm11-2.8c0 1.66-1.57 3-3.5 3s-3.5-1.34-3.5-3 1.57-3 3.5-3 3.5 1.34 3.5 3Z" stroke="currentColor" stroke-width="1.7"/>
+                </svg>
+                <span>NO COVER</span>
+              </div>
+              <img id="coverImage" alt="Cover audio" />
+            </div>
+
+            <input type="file" id="coverInput" accept="image/*" hidden />
+
+            <button class="cover-btn" id="changeCoverBtn">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M4 16.5V19a1 1 0 0 0 1 1h3M20 16.5V19a1 1 0 0 1-1 1h-3M4 7.5V5a1 1 0 0 1 1-1h3M20 7.5V5a1 1 0 0 0-1-1h-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+              Ganti Cover
+            </button>
+          </div>
+
+          <div class="track-info">
+            <div class="track-type">AUDIO FILE</div>
+            <h4 id="previewTitle">Untitled Audio</h4>
+            <p id="previewArtist">Unknown Artist</p>
+
+            <div class="audio-player">
+              <button class="play-btn" id="playBtn">
+                <svg id="playIcon" viewBox="0 0 24 24" fill="none">
+                  <path d="M8 5.5v13l10-6.5L8 5.5Z" fill="currentColor"/>
+                </svg>
+                <svg id="pauseIcon" viewBox="0 0 24 24" fill="none">
+                  <path d="M8 6v12M16 6v12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                </svg>
+              </button>
+
+              <div class="progress-wrap">
+                <div class="progress-bar">
+                  <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="time-row">
+                  <span id="currentTime">0:00</span>
+                  <span id="duration">0:00</span>
+                </div>
+              </div>
+            </div>
+
+            <audio id="audioPlayer"></audio>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-heading compact">
+            <div>
+              <span class="eyebrow">METADATA</span>
+              <h3>Informasi audio</h3>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label for="titleInput">Judul lagu</label>
+            <input id="titleInput" type="text" placeholder="Contoh: Senja Terakhir" />
+          </div>
+
+          <div class="two-columns">
+            <div class="field-group">
+              <label for="artistInput">Artis</label>
+              <input id="artistInput" type="text" placeholder="Nama artis" />
+            </div>
+
+            <div class="field-group">
+              <label for="albumInput">Album</label>
+              <input id="albumInput" type="text" placeholder="Nama album" />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label for="fileNameInput">Nama file output</label>
+            <div class="input-with-suffix">
+              <input id="fileNameInput" type="text" placeholder="audio-baru" />
+              <span id="extensionPreview">.mp3</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section output-section">
+          <div class="section-heading compact">
+            <div>
+              <span class="eyebrow">EXPORT</span>
+              <h3>Format output</h3>
+            </div>
+          </div>
+
+          <div class="format-grid">
+            <button class="format-card active" data-format="mp3">
+              <div class="format-top">
+                <div class="format-icon">MP3</div>
+                <div class="checkmark">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+              </div>
+              <strong>MP3 Audio</strong>
+              <span>Kompatibilitas luas</span>
+            </button>
+
+            <button class="format-card" data-format="m4a">
+              <div class="format-top">
+                <div class="format-icon m4a">M4A</div>
+                <div class="checkmark">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+              </div>
+              <strong>M4A Audio</strong>
+              <span>Kualitas efisien</span>
+            </button>
+          </div>
+
+          <div class="format-notice" id="formatNotice">
+            <svg viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M12 10v6M12 7.2v.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            </svg>
+            <span>Cover dan metadata akan ditanamkan ke file MP3.</span>
+          </div>
+        </div>
+
+        <button class="export-btn" id="exportBtn">
+          <span class="export-normal">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 3v12m0 0 4.5-4.5M12 15 7.5 10.5M4 20h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Ekspor & Download
+          </span>
+          <span class="export-loading">
+            <span class="spinner"></span>
+            Memproses audio...
+          </span>
+        </button>
+
+        <p class="privacy-note">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3 5 6v5c0 4.4 2.9 8.4 7 10 4.1-1.6 7-5.6 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+            <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          File diproses secara lokal di perangkatmu.
+        </p>
+
+      </section>
+
+    </main>
+
+    <footer>
+      <span>AudioForge</span>
+      <span>Local audio metadata editor</span>
+    </footer>
+
+  </div>
+
+  <div class="toast" id="toast">
+    <div class="toast-icon">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <strong id="toastTitle">Berhasil</strong>
+      <span id="toastMessage">File siap diunduh.</span>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/browser-id3-writer@6.1.0/dist/browser-id3-writer.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+    </html>
