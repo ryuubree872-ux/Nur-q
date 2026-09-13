@@ -1,111 +1,550 @@
-/* =========================================================
-   NURQ V3
-   AYAT AUDIO + TIMEZONE + ADHAN + 3D INTERACTION
-   ========================================================= */
+const audioInput = document.getElementById("audioInput");
+const coverInput = document.getElementById("coverInput");
+const chooseAudioBtn = document.getElementById("chooseAudioBtn");
+const changeCoverBtn = document.getElementById("changeCoverBtn");
+const dropZone = document.getElementById("dropZone");
+const editor = document.getElementById("editor");
+const resetBtn = document.getElementById("resetBtn");
 
-const QURAN_API = "https://api.alquran.cloud/v1";
+const audioPlayer = document.getElementById("audioPlayer");
+const playBtn = document.getElementById("playBtn");
+const playIcon = document.getElementById("playIcon");
+const pauseIcon = document.getElementById("pauseIcon");
+const progressFill = document.getElementById("progressFill");
+const currentTimeEl = document.getElementById("currentTime");
+const durationEl = document.getElementById("duration");
 
-const AUDIO_BASE =
-  "https://cdn.islamic.network/quran/audio/128/ar.alafasy";
+const coverArt = document.getElementById("coverArt");
+const coverImage = document.getElementById("coverImage");
 
-const ADHAN_URL =
-  "https://cdn.islamic.network/adhan/adhan.mp3";
+const titleInput = document.getElementById("titleInput");
+const artistInput = document.getElementById("artistInput");
+const albumInput = document.getElementById("albumInput");
+const fileNameInput = document.getElementById("fileNameInput");
+const extensionPreview = document.getElementById("extensionPreview");
 
-const TIMEZONE_CONFIG = {
-  WIB: {
-    label: "WIB",
-    name: "Waktu Indonesia Barat",
-    offset: 7
-  },
+const previewTitle = document.getElementById("previewTitle");
+const previewArtist = document.getElementById("previewArtist");
 
-  WITA: {
-    label: "WITA",
-    name: "Waktu Indonesia Tengah",
-    offset: 8
-  },
+const exportBtn = document.getElementById("exportBtn");
+const formatCards = document.querySelectorAll(".format-card");
+const formatNotice = document.getElementById("formatNotice");
 
-  WIT: {
-    label: "WIT",
-    name: "Waktu Indonesia Timur",
-    offset: 9
+const toast = document.getElementById("toast");
+const toastTitle = document.getElementById("toastTitle");
+const toastMessage = document.getElementById("toastMessage");
+
+let selectedAudioFile = null;
+let selectedCoverBlob = null;
+let selectedCoverMime = "image/jpeg";
+let selectedFormat = "mp3";
+let audioObjectUrl = null;
+let coverObjectUrl = null;
+let toastTimer = null;
+
+/* =========================
+   HELPERS
+========================= */
+
+function showToast(title, message, type = "success") {
+  toastTitle.textContent = title;
+  toastMessage.textContent = message;
+
+  const icon = toast.querySelector(".toast-icon");
+  icon.style.color = type === "error" ? "#ff7b86" : "var(--accent)";
+  icon.style.background = type === "error"
+    ? "rgba(255,95,109,.12)"
+    : "rgba(216,255,79,.12)";
+
+  toast.classList.add("show");
+
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+  }, 3500);
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return "0:00";
+
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
+
+  return `${mins}:${secs}`;
+}
+
+function cleanFileName(name) {
+  return name
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .trim()
+    .replace(/\s+/g, "-") || "audio-baru";
+}
+
+function getAudioTitle(file) {
+  return file.name.replace(/\.[^/.]+$/, "") || "Untitled Audio";
+}
+
+function setLoading(isLoading) {
+  exportBtn.classList.toggle("loading", isLoading);
+  exportBtn.disabled = isLoading;
+}
+
+/* =========================
+   AUDIO UPLOAD
+========================= */
+
+chooseAudioBtn.addEventListener("click", () => {
+  audioInput.click();
+});
+
+dropZone.addEventListener("click", (event) => {
+  if (
+    event.target.closest("button") ||
+    event.target.closest("input")
+  ) return;
+
+  audioInput.click();
+});
+
+audioInput.addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  if (file) loadAudio(file);
+});
+
+["dragenter", "dragover"].forEach(eventName => {
+  dropZone.addEventListener(eventName, event => {
+    event.preventDefault();
+    dropZone.classList.add("dragover");
+  });
+});
+
+["dragleave", "drop"].forEach(eventName => {
+  dropZone.addEventListener(eventName, event => {
+    event.preventDefault();
+    dropZone.classList.remove("dragover");
+  });
+});
+
+dropZone.addEventListener("drop", event => {
+  const file = event.dataTransfer.files[0];
+
+  if (!file) return;
+
+  if (!file.type.startsWith("audio/") && !/\.(mp3|m4a|wav|ogg|flac)$/i.test(file.name)) {
+    showToast("File tidak didukung", "Pilih file audio yang valid.", "error");
+    return;
   }
-};
 
-const state = {
-  surahs: [],
-  current: null,
-  currentIndex: 0,
+  loadAudio(file);
+});
 
-  playing: false,
-  autoNext: true,
+function loadAudio(file) {
+  selectedAudioFile = file;
 
-  adhanEnabled: false,
-  lastAdhanKey: "",
+  if (audioObjectUrl) {
+    URL.revokeObjectURL(audioObjectUrl);
+  }
 
-  timezone:
-    localStorage.getItem("nurq_timezone") ||
-    null,
+  audioObjectUrl = URL.createObjectURL(file);
+  audioPlayer.src = audioObjectUrl;
+  audioPlayer.load();
 
-  bookmarks: JSON.parse(
-    localStorage.getItem(
-      "nurq_bookmarks"
-    ) || "[]"
-  ),
+  const defaultTitle = getAudioTitle(file);
 
-  fontSize: Number(
-    localStorage.getItem(
-      "nurq_font_size"
-    ) || 30
-  )
-};
+  titleInput.value = defaultTitle;
+  artistInput.value = "";
+  albumInput.value = "";
+  fileNameInput.value = cleanFileName(defaultTitle);
 
-const audio =
-  document.getElementById(
-    "audioPlayer"
-  );
+  previewTitle.textContent = defaultTitle;
+  previewArtist.textContent = "Unknown Artist";
 
-const $ =
-  selector =>
-    document.querySelector(
-      selector
+  resetCover();
+
+  editor.classList.remove("hidden");
+  dropZone.classList.add("hidden");
+
+  readMetadata(file);
+
+  setTimeout(() => {
+    editor.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }, 100);
+}
+
+/* =========================
+   READ MP3 METADATA
+========================= */
+
+function readMetadata(file) {
+  if (
+    typeof jsmediatags === "undefined" ||
+    !/\.mp3$/i.test(file.name)
+  ) {
+    return;
+  }
+
+  jsmediatags.read(file, {
+    onSuccess: function(tag) {
+      const tags = tag.tags || {};
+
+      if (tags.title) {
+        titleInput.value = tags.title;
+      }
+
+      if (tags.artist) {
+        artistInput.value = tags.artist;
+      }
+
+      if (tags.album) {
+        albumInput.value = tags.album;
+      }
+
+      const title = titleInput.value || "Untitled Audio";
+      const artist = artistInput.value || "Unknown Artist";
+
+      previewTitle.textContent = title;
+      previewArtist.textContent = artist;
+
+      if (tags.picture) {
+        const picture = tags.picture;
+
+        const byteArray = new Uint8Array(picture.data);
+        const blob = new Blob([byteArray], {
+          type: picture.format || "image/jpeg"
+        });
+
+        setCover(blob, picture.format || "image/jpeg");
+      }
+    },
+    onError: function() {
+      console.log("Metadata tidak tersedia.");
+    }
+  });
+}
+
+/* =========================
+   COVER
+========================= */
+
+changeCoverBtn.addEventListener("click", () => {
+  coverInput.click();
+});
+
+coverInput.addEventListener("change", event => {
+  const file = event.target.files[0];
+
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    showToast("Cover tidak valid", "Pilih file gambar.", "error");
+    return;
+  }
+
+  setCover(file, file.type);
+});
+
+function setCover(blob, mime = "image/jpeg") {
+  selectedCoverBlob = blob;
+  selectedCoverMime = mime;
+
+  if (coverObjectUrl) {
+    URL.revokeObjectURL(coverObjectUrl);
+  }
+
+  coverObjectUrl = URL.createObjectURL(blob);
+  coverImage.src = coverObjectUrl;
+  coverArt.classList.add("has-image");
+}
+
+function resetCover() {
+  selectedCoverBlob = null;
+  selectedCoverMime = "image/jpeg";
+
+  if (coverObjectUrl) {
+    URL.revokeObjectURL(coverObjectUrl);
+    coverObjectUrl = null;
+  }
+
+  coverImage.removeAttribute("src");
+  coverArt.classList.remove("has-image");
+}
+
+/* =========================
+   LIVE METADATA PREVIEW
+========================= */
+
+titleInput.addEventListener("input", () => {
+  previewTitle.textContent = titleInput.value.trim() || "Untitled Audio";
+});
+
+artistInput.addEventListener("input", () => {
+  previewArtist.textContent = artistInput.value.trim() || "Unknown Artist";
+});
+
+fileNameInput.addEventListener("input", () => {
+  fileNameInput.value = fileNameInput.value.replace(/[\\/:*?"<>|]/g, "");
+});
+
+/* =========================
+   AUDIO PLAYER
+========================= */
+
+playBtn.addEventListener("click", async () => {
+  if (!audioPlayer.src) return;
+
+  if (audioPlayer.paused) {
+    try {
+      await audioPlayer.play();
+    } catch (error) {
+      showToast("Tidak dapat memutar", "Browser menolak pemutaran audio.", "error");
+    }
+  } else {
+    audioPlayer.pause();
+  }
+});
+
+audioPlayer.addEventListener("play", () => {
+  playIcon.style.display = "none";
+  pauseIcon.style.display = "block";
+});
+
+audioPlayer.addEventListener("pause", () => {
+  playIcon.style.display = "block";
+  pauseIcon.style.display = "none";
+});
+
+audioPlayer.addEventListener("loadedmetadata", () => {
+  durationEl.textContent = formatTime(audioPlayer.duration);
+});
+
+audioPlayer.addEventListener("timeupdate", () => {
+  const percent = audioPlayer.duration
+    ? (audioPlayer.currentTime / audioPlayer.duration) * 100
+    : 0;
+
+  progressFill.style.width = `${percent}%`;
+  currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+});
+
+audioPlayer.addEventListener("ended", () => {
+  progressFill.style.width = "0%";
+  currentTimeEl.textContent = "0:00";
+});
+
+document.querySelector(".progress-bar").addEventListener("click", event => {
+  if (!audioPlayer.duration) return;
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  const percent = (event.clientX - rect.left) / rect.width;
+
+  audioPlayer.currentTime = percent * audioPlayer.duration;
+});
+
+/* =========================
+   FORMAT SELECTOR
+========================= */
+
+formatCards.forEach(card => {
+  card.addEventListener("click", () => {
+    formatCards.forEach(item => item.classList.remove("active"));
+    card.classList.add("active");
+
+    selectedFormat = card.dataset.format;
+    extensionPreview.textContent = `.${selectedFormat}`;
+
+    if (selectedFormat === "mp3") {
+      formatNotice.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12 10v6M12 7.2v.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span>Cover dan metadata akan ditanamkan ke file MP3.</span>
+      `;
+    } else {
+      formatNotice.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M12 10v6M12 7.2v.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span>M4A membutuhkan pemrosesan codec tambahan. Metadata bergantung pada dukungan format sumber.</span>
+      `;
+    }
+  });
+});
+
+/* =========================
+   MP3 EXPORT WITH ID3
+========================= */
+
+async function exportMP3() {
+  if (!selectedAudioFile) {
+    throw new Error("Belum ada audio.");
+  }
+
+  const title = titleInput.value.trim() || "Untitled Audio";
+  const artist = artistInput.value.trim() || "Unknown Artist";
+  const album = albumInput.value.trim() || "";
+  const fileName = cleanFileName(fileNameInput.value || title);
+
+  const originalBuffer = await selectedAudioFile.arrayBuffer();
+
+  /*
+    browser-id3-writer menyediakan ID3Writer untuk
+    menulis metadata dan cover ke file MP3.
+  */
+
+  if (
+    typeof ID3Writer === "undefined" ||
+    !/\.mp3$/i.test(selectedAudioFile.name)
+  ) {
+    /*
+      Jika sumber bukan MP3, kita tidak memaksakan
+      metadata MP3 ke file lain.
+    */
+    downloadBlob(
+      new Blob([originalBuffer], {
+        type: selectedAudioFile.type || "audio/mpeg"
+      }),
+      `${fileName}.mp3`
     );
 
-const $$ =
-  selector =>
-    [...document.querySelectorAll(
-      selector
-    )];
+    return;
+  }
 
+  const writer = new ID3Writer(originalBuffer);
 
-/* =========================================================
-   INIT
-   ========================================================= */
+  writer
+    .setFrame("TIT2", title)
+    .setFrame("TPE1", [artist]);
 
-document.addEventListener(
-  "DOMContentLoaded",
-  async () => {
+  if (album) {
+    writer.setFrame("TALB", album);
+  }
 
-    initNavigation();
-    initSearch();
-    initSettings();
-    initModals();
-    initPrayer();
-    initAyahButtons();
-    initDailyVerse();
+  if (selectedCoverBlob) {
+    const coverBuffer = await selectedCoverBlob.arrayBuffer();
 
-    applyFont();
+    writer.setFrame("APIC", {
+      type: 3,
+      data: coverBuffer,
+      description: "Cover",
+      useUnicodeEncoding: false
+    });
+  }
 
+  writer.addTag();
+
+  const taggedBuffer = writer.arrayBuffer;
+
+  downloadBlob(
+    new Blob([taggedBuffer], { type: "audio/mpeg" }),
+    `${fileName}.mp3`
+  );
+}
+
+/* =========================
+   EXPORT
+========================= */
+
+exportBtn.addEventListener("click", async () => {
+  if (!selectedAudioFile) {
+    showToast("Audio belum dipilih", "Silakan masukkan audio terlebih dahulu.", "error");
+    return;
+  }
+
+  setLoading(true);
+
+  try {
     /*
-      First entry timezone selector
+      MP3:
+      - Jika input MP3, metadata + cover ditulis langsung.
+      - Jika input bukan MP3, versi ini mengunduh data sumber
+        dengan ekstensi MP3 sebagai fallback sederhana.
     */
-    if (!state.timezone) {
-      showTimezoneSelector();
+
+    if (selectedFormat === "mp3") {
+      await exportMP3();
+
+      showToast(
+        "Berhasil diekspor",
+        "Audio MP3 siap diunduh."
+      );
     }
 
-    await loadSurahs();
+    /*
+      M4A:
+      Konversi penuh memerlukan FFmpeg.wasm.
+      Agar tidak mengklaim konversi palsu, versi ini
+      memberi pemberitahuan bahwa konversi codec belum
+      diaktifkan dalam build ringan ini.
+    */
 
-    await loadPrayerTimes();
+    if (selectedFormat === "m4a") {
+      showToast(
+        "M4A belum aktif",
+        "Gunakan MP3 atau aktifkan FFmpeg untuk konversi M4A.",
+        "error"
+      );
+    }
 
+  } catch (error) {
+    console.error(error);
+
+    showToast(
+      "Ekspor gagal",
+      error.message || "Terjadi kesalahan saat memproses audio.",
+      "error"
+    );
+  } finally {
+    setLoading(false);
+  }
+});
+
+/* =========================
+   DOWNLOAD
+========================= */
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+/* =========================
+   RESET
+========================= */
+
+resetBtn.addEventListener("click", () => {
+  audioPlayer.pause();
+
+  if (audioObjectUrl) {
+    URL.revokeObjectURL(audioObjectUrl);
+    audioObjectUrl = null;
+  }
+
+  selectedAudioFile = null;
+  audioInput.value = "";
+  coverInput.value = "";
+
+  editor.classList.add("hidden");
+  dropZone.classList.remove("hidden");
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
+});
     startPrayerClock();
 
     registerServiceWorker();
